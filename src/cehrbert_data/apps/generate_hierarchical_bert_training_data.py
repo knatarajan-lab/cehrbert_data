@@ -29,9 +29,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from cehrbert_data.config.output_names import PARQUET_DATA_PATH, QUALIFIED_CONCEPT_LIST_PATH
-from cehrbert_data.const.common import (
-    MEASUREMENT, OBSERVATION_PERIOD, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE
-)
+from cehrbert_data.const.common import MEASUREMENT, OBSERVATION_PERIOD, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE
 from cehrbert_data.utils.spark_utils import (
     create_hierarchical_sequence_data,
     join_domain_tables,

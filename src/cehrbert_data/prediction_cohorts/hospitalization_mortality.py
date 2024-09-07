@@ -1,16 +1,10 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec
 from cehrbert_data.cohorts.spark_app_base import create_prediction_cohort
+from cehrbert_data.const.common import CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE, VISIT_OCCURRENCE
 from cehrbert_data.spark_parse_args import create_spark_args
-from cehrbert_data.const.common import (
-    VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE
-)
 
 DEPENDENCY_LIST = [VISIT_OCCURRENCE]
-DOMAIN_TABLE_LIST = [
-    CONDITION_OCCURRENCE,
-    PROCEDURE_OCCURRENCE,
-    DRUG_EXPOSURE
-]
+DOMAIN_TABLE_LIST = [CONDITION_OCCURRENCE, PROCEDURE_OCCURRENCE, DRUG_EXPOSURE]
 
 HOSPITALIZATION_QUERY = """
 SELECT DISTINCT

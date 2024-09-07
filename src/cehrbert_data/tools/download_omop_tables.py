@@ -4,9 +4,15 @@ import os.path
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
+
 from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, MEASUREMENT,
-    DRUG_EXPOSURE, PROCEDURE_OCCURRENCE, OBSERVATION
+    CONDITION_OCCURRENCE,
+    DRUG_EXPOSURE,
+    MEASUREMENT,
+    OBSERVATION,
+    PERSON,
+    PROCEDURE_OCCURRENCE,
+    VISIT_OCCURRENCE,
 )
 
 omop_table_dict = {
@@ -27,8 +33,7 @@ def find_num_of_records(domain_table_name, db_properties, column_name, spark_ses
         .option("url", db_properties["base_url"])
         .option(
             "dbtable",
-            "(SELECT MAX({}) AS {} FROM {}) as {}".format(column_name, column_name,
-                                                          domain_table_name, column_name),
+            "(SELECT MAX({}) AS {} FROM {}) as {}".format(column_name, column_name, domain_table_name, column_name),
         )
         .option("user", db_properties["user"])
         .option("password", db_properties["password"])
@@ -39,8 +44,7 @@ def find_num_of_records(domain_table_name, db_properties, column_name, spark_ses
     return table_max_id
 
 
-def download_omop_tables_with_partitions(domain_table, column_name, db_properties, output_folder,
-                                         spark_session):
+def download_omop_tables_with_partitions(domain_table, column_name, db_properties, output_folder, spark_session):
     table = (
         spark_session.read.format("jdbc")
         .option("url", db_properties["base_url"])

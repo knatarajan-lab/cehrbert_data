@@ -1,9 +1,5 @@
-from cehrbert_data.cohorts.query_builder import (
-    AncestorTableSpec, QueryBuilder, QuerySpec
-)
-from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, PROCEDURE_OCCURRENCE
-)
+from cehrbert_data.cohorts.query_builder import AncestorTableSpec, QueryBuilder, QuerySpec
+from cehrbert_data.const.common import PERSON, PROCEDURE_OCCURRENCE, VISIT_OCCURRENCE
 
 COHORT_QUERY_TEMPLATE = """
 SELECT DISTINCT

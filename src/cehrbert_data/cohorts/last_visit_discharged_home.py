@@ -1,7 +1,5 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec
-from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE
-)
+from cehrbert_data.const.common import PERSON, VISIT_OCCURRENCE
 
 COHORT_QUERY = """
 SELECT DISTINCT

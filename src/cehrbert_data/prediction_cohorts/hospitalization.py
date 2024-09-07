@@ -1,9 +1,13 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec
 from cehrbert_data.cohorts.spark_app_base import create_prediction_cohort
-from cehrbert_data.spark_parse_args import create_spark_args
 from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE
+    CONDITION_OCCURRENCE,
+    DRUG_EXPOSURE,
+    PERSON,
+    PROCEDURE_OCCURRENCE,
+    VISIT_OCCURRENCE,
 )
+from cehrbert_data.spark_parse_args import create_spark_args
 
 HOSPITALIZATION_OUTCOME_QUERY = """
 SELECT DISTINCT
@@ -52,11 +56,7 @@ WHERE num_of_visits between 2 and 30
 HOSPITALIZATION_TARGET_COHORT = "hospitalization_target"
 HOSPITALIZATION_OUTCOME_COHORT = "hospitalization_outcome"
 DEPENDENCY_LIST = [PERSON, CONDITION_OCCURRENCE, VISIT_OCCURRENCE]
-DOMAIN_TABLE_LIST = [
-    CONDITION_OCCURRENCE,
-    DRUG_EXPOSURE,
-    PROCEDURE_OCCURRENCE
-]
+DOMAIN_TABLE_LIST = [CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE]
 
 
 def main(spark_args):

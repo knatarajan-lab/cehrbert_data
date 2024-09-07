@@ -1,7 +1,5 @@
 from cehrbert_data.cohorts.query_builder import AncestorTableSpec, QueryBuilder, QuerySpec
-from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE
-)
+from cehrbert_data.const.common import CONDITION_OCCURRENCE, PERSON, VISIT_OCCURRENCE
 
 COHORT_QUERY_TEMPLATE = """
 SELECT

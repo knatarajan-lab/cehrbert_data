@@ -21,9 +21,7 @@ from pyspark.sql import functions as F
 
 from cehrbert_data.config.output_names import CONCEPT_SIMILARITY_PATH, QUALIFIED_CONCEPT_LIST_PATH
 from cehrbert_data.const.common import CONCEPT, CONCEPT_ANCESTOR
-from cehrbert_data.utils.spark_utils import (
-    join_domain_tables, preprocess_domain_table, validate_table_names
-)
+from cehrbert_data.utils.spark_utils import join_domain_tables, preprocess_domain_table, validate_table_names
 
 
 def extract_data(spark: SparkSession, input_folder: str, domain_table_list: List[str]):

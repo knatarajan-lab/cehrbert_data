@@ -1,9 +1,13 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec
 from cehrbert_data.cohorts.spark_app_base import create_prediction_cohort
-from cehrbert_data.spark_parse_args import create_spark_args
 from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE
+    CONDITION_OCCURRENCE,
+    DRUG_EXPOSURE,
+    PERSON,
+    PROCEDURE_OCCURRENCE,
+    VISIT_OCCURRENCE,
 )
+from cehrbert_data.spark_parse_args import create_spark_args
 
 HEART_FAILURE_HOSPITALIZATION_QUERY = """
 WITH hf_concepts AS (
@@ -71,8 +75,7 @@ def main(spark_args):
 
     ehr_table_list = spark_args.ehr_table_list if spark_args.ehr_table_list else DOMAIN_TABLE_LIST
 
-    create_prediction_cohort(spark_args, hf_inpatient_target_querybuilder, hospitalization,
-                             ehr_table_list)
+    create_prediction_cohort(spark_args, hf_inpatient_target_querybuilder, hospitalization, ehr_table_list)
 
 
 if __name__ == "__main__":

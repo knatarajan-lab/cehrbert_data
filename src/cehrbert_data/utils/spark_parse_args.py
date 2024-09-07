@@ -81,8 +81,7 @@ def create_spark_args():
         --use_age_group: Whether to represent age using age groups in patient sequences.
         --single_contribution: Whether patients should contribute only once to the training data.
     """
-    parser = argparse.ArgumentParser(
-        description="Arguments for spark applications for generating cohort definitions")
+    parser = argparse.ArgumentParser(description="Arguments for spark applications for generating cohort definitions")
     parser.add_argument(
         "-c",
         "--cohort_name",
@@ -279,8 +278,8 @@ def create_spark_args():
         dest="classic_bert_seq",
         action="store_true",
         help="Specify whether to generate the sequence of "
-             "EHR records using the classic BERT sequence representation where "
-             "visits are separated by a SEP token",
+        "EHR records using the classic BERT sequence representation where "
+        "visits are separated by a SEP token",
     )
     parser.add_argument(
         "--is_first_time_outcome",

@@ -6,7 +6,12 @@ from cehrbert_data.cohorts.query_builder import (
     create_negative_query_spec,
 )
 from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE, MEASUREMENT
+    CONDITION_OCCURRENCE,
+    DRUG_EXPOSURE,
+    MEASUREMENT,
+    PERSON,
+    PROCEDURE_OCCURRENCE,
+    VISIT_OCCURRENCE,
 )
 
 # 1. Incidens of Heart Failure
@@ -288,9 +293,7 @@ FROM global_temp.{intermediate_heart_failure}
 WHERE inclusion = {inclusion}
 """
 
-DEPENDENCY_LIST = [
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE, MEASUREMENT
-]
+DEPENDENCY_LIST = [PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE, MEASUREMENT]
 HEART_FAILURE_CONCEPT_TABLE = "hf_concept"
 WORSEN_HF_DX_CONCEPT_TABLE = "worsen_hf_dx_concepts"
 PHYSICAL_EXAM_COHORT_TABLE = "phy_exam_concepts"

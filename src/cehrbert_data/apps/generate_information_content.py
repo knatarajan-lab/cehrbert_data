@@ -26,9 +26,7 @@ from pyspark.sql import functions as F
 
 from cehrbert_data.config.output_names import INFORMATION_CONTENT_DATA_PATH
 from cehrbert_data.const.common import CONCEPT_ANCESTOR
-from cehrbert_data.utils.spark_utils import (
-    join_domain_tables, preprocess_domain_table, validate_table_names
-)
+from cehrbert_data.utils.spark_utils import join_domain_tables, preprocess_domain_table, validate_table_names
 
 
 def main(input_folder, output_folder, domain_table_list, date_filter):

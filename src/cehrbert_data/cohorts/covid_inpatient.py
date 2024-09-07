@@ -1,7 +1,5 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec
-from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, MEASUREMENT, CONDITION_OCCURRENCE
-)
+from cehrbert_data.const.common import CONDITION_OCCURRENCE, MEASUREMENT, PERSON, VISIT_OCCURRENCE
 
 COVID_COHORT_QUERY = """
 WITH covid_positive AS
@@ -81,8 +79,6 @@ DEPENDENCY_LIST = [PERSON, VISIT_OCCURRENCE, MEASUREMENT, CONDITION_OCCURRENCE]
 
 
 def query_builder():
-    query = QuerySpec(table_name=DEFAULT_COHORT_NAME, query_template=COVID_COHORT_QUERY,
-                      parameters={})
+    query = QuerySpec(table_name=DEFAULT_COHORT_NAME, query_template=COVID_COHORT_QUERY, parameters={})
 
-    return QueryBuilder(cohort_name=DEFAULT_COHORT_NAME, dependency_list=DEPENDENCY_LIST,
-                        query=query)
+    return QueryBuilder(cohort_name=DEFAULT_COHORT_NAME, dependency_list=DEPENDENCY_LIST, query=query)

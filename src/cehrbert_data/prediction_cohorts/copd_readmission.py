@@ -1,9 +1,13 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec
 from cehrbert_data.cohorts.spark_app_base import create_prediction_cohort
-from cehrbert_data.spark_parse_args import create_spark_args
 from cehrbert_data.const.common import (
-    PERSON, VISIT_OCCURRENCE, CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE
+    CONDITION_OCCURRENCE,
+    DRUG_EXPOSURE,
+    PERSON,
+    PROCEDURE_OCCURRENCE,
+    VISIT_OCCURRENCE,
 )
+from cehrbert_data.spark_parse_args import create_spark_args
 
 COPD_HOSPITALIZATION_QUERY = """
 WITH copd_conditions AS (
