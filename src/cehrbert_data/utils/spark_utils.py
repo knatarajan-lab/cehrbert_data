@@ -28,7 +28,7 @@ from cehrbert_data.decorators.patient_event_decorator import (
     PatientEventBaseDecorator,
     time_token_func,
 )
-from cehrbert_data.sql_templates import measurement_unit_stats_query
+from cehrbert_data.queries import measurement_unit_stats_query
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
