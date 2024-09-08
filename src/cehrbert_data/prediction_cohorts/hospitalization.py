@@ -7,7 +7,7 @@ from cehrbert_data.const.common import (
     PROCEDURE_OCCURRENCE,
     VISIT_OCCURRENCE,
 )
-from cehrbert_data.spark_parse_args import create_spark_args
+from cehrbert_data.utils.spark_parse_args import create_spark_args
 
 HOSPITALIZATION_OUTCOME_QUERY = """
 SELECT DISTINCT
