@@ -1,7 +1,9 @@
 import unittest
-from ..pyspark_test_base import PySparkAbstract
-from cehrbert_data.decorators.patient_event_decorator import AttType
+
 from cehrbert_data.apps.generate_training_data import main
+from cehrbert_data.decorators.patient_event_decorator import AttType
+
+from ..pyspark_test_base import PySparkAbstract
 
 
 class HfReadmissionTest(PySparkAbstract):
@@ -14,10 +16,14 @@ class HfReadmissionTest(PySparkAbstract):
             date_filter="1985-01-01",
             include_visit_type=True,
             is_new_patient_representation=True,
+            exclude_visit_tokens=False,
+            is_classic_bert=False,
+            include_prolonged_stay=False,
             include_concept_list=False,
             gpt_patient_sequence=True,
             apply_age_filter=True,
-            att_type=AttType.DAY
+            include_death=False,
+            att_type=AttType.DAY,
         )
 
 
