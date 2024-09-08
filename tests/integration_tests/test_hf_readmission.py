@@ -1,13 +1,13 @@
 import sys
 import unittest
-from ..pyspark_test import PySparkAbstract
-from cehrbert_data.spark_parse_args import create_spark_args
+from ..pyspark_test_base import PySparkAbstract
+from cehrbert_data.utils.spark_parse_args import create_spark_args
 from cehrbert_data.prediction_cohorts.hf_readmission import main
 
 
 class HfReadmissionTest(PySparkAbstract):
 
-    def run_pyspark_app_test(self):
+    def test_run_pyspark_app(self):
         sys.argv = [
             "hf_readmission.py",
             "--cohort_name", "hf_readmission",
@@ -23,7 +23,7 @@ class HfReadmissionTest(PySparkAbstract):
             "--include_visit_type",
             "--is_new_patient_representation",
             "--att_type", "cehr_bert",
-            "--ehr_table_list", "condition_occurrence procedure_occurrence drug_exposure"
+            "--ehr_table_list", "condition_occurrence", "procedure_occurrence", "drug_exposure"
         ]
 
         main(create_spark_args())

@@ -1,32 +1,24 @@
-import sys
 import unittest
 from ..pyspark_test_base import PySparkAbstract
-from cehrbert_data.spark_parse_args import create_spark_args
-from cehrbert_data.prediction_cohorts.hf_readmission import main
+from cehrbert_data.decorators.patient_event_decorator import AttType
+from cehrbert_data.apps.generate_training_data import main
 
 
 class HfReadmissionTest(PySparkAbstract):
 
     def test_run_pyspark_app(self):
-        sys.argv = [
-            "hf_readmission.py",
-            "--cohort_name", "hf_readmission",
-            "--input_folder", self.get_sample_data_folder(),
-            "--output_folder", self.get_output_folder(),
-            "--date_lower_bound", "1985-01-01",
-            "--date_upper_bound", "2023-12-31",
-            "--age_lower_bound", "18",
-            "--age_upper_bound", "100",
-            "--observation_window", "360",
-            "--prediction_start_days", "0",
-            "--prediction_window", "30",
-            "--include_visit_type",
-            "--is_new_patient_representation",
-            "--att_type", "cehr_bert",
-            "--ehr_table_list", "condition_occurrence", "procedure_occurrence", "drug_exposure"
-        ]
-
-        main(create_spark_args())
+        main(
+            input_folder=self.get_sample_data_folder(),
+            output_folder=self.get_output_folder(),
+            domain_table_list=["condition_occurrence", "drug_exposure", "procedure_occurrence"],
+            date_filter="1985-01-01",
+            include_visit_type=True,
+            is_new_patient_representation=True,
+            include_concept_list=False,
+            gpt_patient_sequence=True,
+            apply_age_filter=True,
+            att_type=AttType.DAY
+        )
 
 
 if __name__ == "__main__":

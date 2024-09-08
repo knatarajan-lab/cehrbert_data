@@ -3,12 +3,10 @@ import sys
 import unittest
 import tempfile
 from pathlib import Path
-from abc import abstractmethod
-from cehrbert_data.spark_parse_args import create_spark_args
-from cehrbert_data.prediction_cohorts.hf_readmission import main
+from abc import abstractmethod, ABC
 
 
-class PySparkAbstract(unittest.TestCase):
+class PySparkAbstract(unittest.TestCase, ABC):
 
     @classmethod
     def setUpClass(cls):
@@ -34,7 +32,7 @@ class PySparkAbstract(unittest.TestCase):
 
     @abstractmethod
     def test_run_pyspark_app(self):
-        raise NotImplementedError("Not implemented yet")
+        pass
 
     def get_sample_data_folder(self):
         return self.data_folder
