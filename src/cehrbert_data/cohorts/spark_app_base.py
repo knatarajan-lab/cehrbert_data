@@ -87,16 +87,16 @@ class BaseCohortBuilder(ABC):
     cohort_required_columns = ["person_id", "index_date", "visit_occurrence_id"]
 
     def __init__(
-        self,
-        query_builder: QueryBuilder,
-        input_folder: str,
-        output_folder: str,
-        date_lower_bound: str,
-        date_upper_bound: str,
-        age_lower_bound: int,
-        age_upper_bound: int,
-        prior_observation_period: int,
-        post_observation_period: int,
+            self,
+            query_builder: QueryBuilder,
+            input_folder: str,
+            output_folder: str,
+            date_lower_bound: str,
+            date_upper_bound: str,
+            age_lower_bound: int,
+            age_upper_bound: int,
+            prior_observation_period: int,
+            post_observation_period: int,
     ):
 
         self._query_builder = query_builder
@@ -256,41 +256,41 @@ class BaseCohortBuilder(ABC):
 
 class NestedCohortBuilder:
     def __init__(
-        self,
-        cohort_name: str,
-        input_folder: str,
-        output_folder: str,
-        target_cohort: DataFrame,
-        outcome_cohort: DataFrame,
-        ehr_table_list: List[str],
-        observation_window: int,
-        hold_off_window: int,
-        prediction_start_days: int,
-        prediction_window: int,
-        num_of_visits: int,
-        num_of_concepts: int,
-        patient_splits_folder: str = None,
-        is_window_post_index: bool = False,
-        include_visit_type: bool = True,
-        allow_measurement_only: bool = False,
-        exclude_visit_tokens: bool = False,
-        is_feature_concept_frequency: bool = False,
-        is_roll_up_concept: bool = False,
-        include_concept_list: bool = True,
-        is_new_patient_representation: bool = False,
-        gpt_patient_sequence: bool = False,
-        is_hierarchical_bert: bool = False,
-        classic_bert_seq: bool = False,
-        is_first_time_outcome: bool = False,
-        is_questionable_outcome_existed: bool = False,
-        is_remove_index_prediction_starts: bool = False,
-        is_prediction_window_unbounded: bool = False,
-        is_observation_window_unbounded: bool = False,
-        is_population_estimation: bool = False,
-        att_type: AttType = AttType.CEHR_BERT,
-        exclude_demographic: bool = True,
-        use_age_group: bool = False,
-        single_contribution: bool = False,
+            self,
+            cohort_name: str,
+            input_folder: str,
+            output_folder: str,
+            target_cohort: DataFrame,
+            outcome_cohort: DataFrame,
+            ehr_table_list: List[str],
+            observation_window: int,
+            hold_off_window: int,
+            prediction_start_days: int,
+            prediction_window: int,
+            num_of_visits: int,
+            num_of_concepts: int,
+            patient_splits_folder: str = None,
+            is_window_post_index: bool = False,
+            include_visit_type: bool = True,
+            allow_measurement_only: bool = False,
+            exclude_visit_tokens: bool = False,
+            is_feature_concept_frequency: bool = False,
+            is_roll_up_concept: bool = False,
+            include_concept_list: bool = True,
+            is_new_patient_representation: bool = False,
+            gpt_patient_sequence: bool = False,
+            is_hierarchical_bert: bool = False,
+            classic_bert_seq: bool = False,
+            is_first_time_outcome: bool = False,
+            is_questionable_outcome_existed: bool = False,
+            is_remove_index_prediction_starts: bool = False,
+            is_prediction_window_unbounded: bool = False,
+            is_observation_window_unbounded: bool = False,
+            is_population_estimation: bool = False,
+            att_type: AttType = AttType.CEHR_BERT,
+            exclude_demographic: bool = True,
+            use_age_group: bool = False,
+            single_contribution: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -494,6 +494,13 @@ class NestedCohortBuilder:
             .where(F.col("num_of_concepts") >= self._num_of_concepts)
         )
 
+        # Add time_to_event
+        cohort = cohort.withColumn(
+            "study_end_date",
+            F.coalesce(F.col("outcome_date"), F.date_add(cohort.index_date, self._prediction_window))
+        )
+        cohort = cohort.withColumn("time_to_event", F.datediff("study_end_date", "index_date"))
+
         # if patient_splits is provided, we will
         if self._patient_splits_folder:
             patient_splits = self.spark.read.parquet(self._patient_splits_folder)
@@ -623,10 +630,10 @@ class NestedCohortBuilder:
 
 
 def create_prediction_cohort(
-    spark_args,
-    target_query_builder: QueryBuilder,
-    outcome_query_builder: QueryBuilder,
-    ehr_table_list,
+        spark_args,
+        target_query_builder: QueryBuilder,
+        outcome_query_builder: QueryBuilder,
+        ehr_table_list,
 ):
     """
     TODO.
