@@ -494,11 +494,21 @@ class NestedCohortBuilder:
             .where(F.col("num_of_concepts") >= self._num_of_concepts)
         )
 
-        # Add time_to_event
-        cohort = cohort.withColumn(
-            "study_end_date",
-            F.coalesce(F.col("outcome_date"), F.date_add(cohort.index_date, self._prediction_window))
-        )
+        if self._is_prediction_window_unbounded:
+            observation_period = self._dependency_dict[OBSERVATION_PERIOD]
+            # Add time_to_event
+            cohort = cohort.join(
+                observation_period.select("person_id", "observation_period_end_date"), "person_id"
+            ).withColumn(
+                "study_end_date",
+                F.coalesce(F.col("outcome_date"), F.col("observation_period_end_date"))
+            ).drop("observation_period_end_date")
+        else:
+            # Add time_to_event
+            cohort = cohort.withColumn(
+                "study_end_date",
+                F.coalesce(F.col("outcome_date"), F.date_add(cohort.index_date, self._prediction_window))
+            )
         cohort = cohort.withColumn("time_to_event", F.datediff("study_end_date", "index_date"))
 
         # if patient_splits is provided, we will
