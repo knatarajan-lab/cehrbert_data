@@ -253,6 +253,12 @@ def create_spark_args():
         help="Specify whether to roll up the concepts to their ancestors",
     )
     parser.add_argument(
+        "--is_drug_roll_up_concept",
+        dest="is_drug_roll_up_concept",
+        action="store_true",
+        help="Specify whether to roll up the drug concepts to their ancestors",
+    )
+    parser.add_argument(
         "-ip",
         "--is_new_patient_representation",
         dest="is_new_patient_representation",
@@ -278,8 +284,8 @@ def create_spark_args():
         dest="classic_bert_seq",
         action="store_true",
         help="Specify whether to generate the sequence of "
-        "EHR records using the classic BERT sequence representation where "
-        "visits are separated by a SEP token",
+             "EHR records using the classic BERT sequence representation where "
+             "visits are separated by a SEP token",
     )
     parser.add_argument(
         "--is_first_time_outcome",

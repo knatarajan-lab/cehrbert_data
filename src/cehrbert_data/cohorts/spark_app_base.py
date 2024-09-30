@@ -276,6 +276,7 @@ class NestedCohortBuilder:
             exclude_visit_tokens: bool = False,
             is_feature_concept_frequency: bool = False,
             is_roll_up_concept: bool = False,
+            is_drug_roll_up_concept: bool = True,
             include_concept_list: bool = True,
             is_new_patient_representation: bool = False,
             gpt_patient_sequence: bool = False,
@@ -312,6 +313,7 @@ class NestedCohortBuilder:
         self._classic_bert_seq = classic_bert_seq
         self._is_feature_concept_frequency = is_feature_concept_frequency
         self._is_roll_up_concept = is_roll_up_concept
+        self._is_drug_roll_up_concept = is_drug_roll_up_concept
         self._is_new_patient_representation = is_new_patient_representation
         self._gpt_patient_sequence = gpt_patient_sequence
         self._is_hierarchical_bert = is_hierarchical_bert
@@ -347,6 +349,7 @@ class NestedCohortBuilder:
             f"allow_measurement_only: {allow_measurement_only}\n"
             f"is_feature_concept_frequency: {is_feature_concept_frequency}\n"
             f"is_roll_up_concept: {is_roll_up_concept}\n"
+            f"is_drug_roll_up_concept: {is_drug_roll_up_concept}\n"
             f"is_new_patient_representation: {is_new_patient_representation}\n"
             f"gpt_patient_sequence: {gpt_patient_sequence}\n"
             f"is_hierarchical_bert: {is_hierarchical_bert}\n"
@@ -536,12 +539,13 @@ class NestedCohortBuilder:
         """
         # Extract all ehr records for the patients
         ehr_records = extract_ehr_records(
-            self.spark,
-            self._input_folder,
-            self._ehr_table_list,
-            self._include_visit_type,
-            self._is_roll_up_concept,
-            self._include_concept_list,
+            spark=self.spark,
+            input_folder=self._input_folder,
+            domain_table_list=self._ehr_table_list,
+            include_visit_type=self._include_visit_type,
+            with_diagnosis_rollup=self._is_roll_up_concept,
+            with_drug_rollup=self._is_drug_roll_up_concept,
+            include_concept_list=self._include_concept_list,
         )
 
         # Duplicate the records for cohorts that allow multiple entries
@@ -654,52 +658,24 @@ def create_prediction_cohort(
     :param ehr_table_list:
     :return:
     """
-    cohort_name = spark_args.cohort_name
-    input_folder = spark_args.input_folder
-    output_folder = spark_args.output_folder
-    date_lower_bound = spark_args.date_lower_bound
-    date_upper_bound = spark_args.date_upper_bound
-    age_lower_bound = spark_args.age_lower_bound
-    age_upper_bound = spark_args.age_upper_bound
-    observation_window = spark_args.observation_window
-    prediction_start_days = spark_args.prediction_start_days
-    prediction_window = spark_args.prediction_window
-    hold_off_window = spark_args.hold_off_window
-    num_of_visits = spark_args.num_of_visits
-    num_of_concepts = spark_args.num_of_concepts
-    include_visit_type = spark_args.include_visit_type
-    exclude_visit_tokens = spark_args.exclude_visit_tokens
-    is_feature_concept_frequency = spark_args.is_feature_concept_frequency
-    is_roll_up_concept = spark_args.is_roll_up_concept
-    is_window_post_index = spark_args.is_window_post_index
-    is_new_patient_representation = spark_args.is_new_patient_representation
-    is_hierarchical_bert = spark_args.is_hierarchical_bert
-    classic_bert_seq = spark_args.classic_bert_seq
-    is_first_time_outcome = spark_args.is_first_time_outcome
-    is_prediction_window_unbounded = spark_args.is_prediction_window_unbounded
-    is_observation_window_unbounded = spark_args.is_observation_window_unbounded
-    # If the outcome negative query exists, that means we need to remove those questionable
-    # outcomes from the target cohort
-    is_questionable_outcome_existed = outcome_query_builder.get_negative_query() is not None
-
-    # Do we want to remove those records whose outcome occur between index_date and the start of
-    # the prediction window
-    is_remove_index_prediction_starts = spark_args.is_remove_index_prediction_starts
-
     # Toggle the prior/post observation_period depending on the is_window_post_index flag
-    prior_observation_period = 0 if is_window_post_index else observation_window + hold_off_window
-    post_observation_period = observation_window + hold_off_window if is_window_post_index else 0
+    prior_observation_period = (
+        0 if spark_args.is_window_post_index else spark_args.observation_window + spark_args.hold_off_window
+    )
+    post_observation_period = (
+        spark_args.observation_window + spark_args.hold_off_window if spark_args.is_window_post_index else 0
+    )
 
     # Generate the target cohort
     target_cohort = (
         BaseCohortBuilder(
             query_builder=target_query_builder,
-            input_folder=input_folder,
-            output_folder=output_folder,
-            date_lower_bound=date_lower_bound,
-            date_upper_bound=date_upper_bound,
-            age_lower_bound=age_lower_bound,
-            age_upper_bound=age_upper_bound,
+            input_folder=spark_args.input_folder,
+            output_folder=spark_args.output_folder,
+            date_lower_bound=spark_args.date_lower_bound,
+            date_upper_bound=spark_args.date_upper_bound,
+            age_lower_bound=spark_args.age_lower_bound,
+            age_upper_bound=spark_args.age_upper_bound,
             prior_observation_period=prior_observation_period,
             post_observation_period=post_observation_period,
         )
@@ -711,12 +687,12 @@ def create_prediction_cohort(
     outcome_cohort = (
         BaseCohortBuilder(
             query_builder=outcome_query_builder,
-            input_folder=input_folder,
-            output_folder=output_folder,
-            date_lower_bound=date_lower_bound,
-            date_upper_bound=date_upper_bound,
-            age_lower_bound=age_lower_bound,
-            age_upper_bound=age_upper_bound,
+            input_folder=spark_args.input_folder,
+            output_folder=spark_args.output_folder,
+            date_lower_bound=spark_args.date_lower_bound,
+            date_upper_bound=spark_args.date_upper_bound,
+            age_lower_bound=spark_args.age_lower_bound,
+            age_upper_bound=spark_args.age_upper_bound,
             prior_observation_period=0,
             post_observation_period=0,
         )
@@ -725,35 +701,40 @@ def create_prediction_cohort(
     )
 
     NestedCohortBuilder(
-        cohort_name=cohort_name,
-        input_folder=input_folder,
-        output_folder=output_folder,
+        cohort_name=spark_args.cohort_name,
+        input_folder=spark_args.input_folder,
+        output_folder=spark_args.output_folder,
         patient_splits_folder=spark_args.patient_splits_folder,
         target_cohort=target_cohort,
         outcome_cohort=outcome_cohort,
         ehr_table_list=ehr_table_list,
-        observation_window=observation_window,
-        hold_off_window=hold_off_window,
-        prediction_start_days=prediction_start_days,
-        prediction_window=prediction_window,
-        num_of_visits=num_of_visits,
-        num_of_concepts=num_of_concepts,
-        is_window_post_index=is_window_post_index,
-        include_visit_type=include_visit_type,
-        exclude_visit_tokens=exclude_visit_tokens,
+        observation_window=spark_args.observation_window,
+        hold_off_window=spark_args.hold_off_window,
+        prediction_start_days=spark_args.prediction_start_days,
+        prediction_window=spark_args.prediction_window,
+        num_of_visits=spark_args.num_of_visits,
+        num_of_concepts=spark_args.num_of_concepts,
+        is_window_post_index=spark_args.is_window_post_index,
+        include_visit_type=spark_args.include_visit_type,
+        exclude_visit_tokens=spark_args.exclude_visit_tokens,
         allow_measurement_only=spark_args.allow_measurement_only,
-        is_feature_concept_frequency=is_feature_concept_frequency,
-        is_roll_up_concept=is_roll_up_concept,
+        is_feature_concept_frequency=spark_args.is_feature_concept_frequency,
+        is_roll_up_concept=spark_args.is_roll_up_concept,
+        is_drug_roll_up_concept=spark_args.is_drug_roll_up_concept,
         include_concept_list=spark_args.include_concept_list,
-        is_new_patient_representation=is_new_patient_representation,
+        is_new_patient_representation=spark_args.is_new_patient_representation,
         gpt_patient_sequence=spark_args.gpt_patient_sequence,
-        is_hierarchical_bert=is_hierarchical_bert,
-        classic_bert_seq=classic_bert_seq,
-        is_first_time_outcome=is_first_time_outcome,
-        is_questionable_outcome_existed=is_questionable_outcome_existed,
-        is_prediction_window_unbounded=is_prediction_window_unbounded,
-        is_remove_index_prediction_starts=is_remove_index_prediction_starts,
-        is_observation_window_unbounded=is_observation_window_unbounded,
+        is_hierarchical_bert=spark_args.is_hierarchical_bert,
+        classic_bert_seq=spark_args.classic_bert_seq,
+        is_first_time_outcome=spark_args.is_first_time_outcome,
+        # If the outcome negative query exists, that means we need to remove those questionable
+        # outcomes from the target cohort
+        is_questionable_outcome_existed=outcome_query_builder.get_negative_query() is not None,
+        is_prediction_window_unbounded=spark_args.is_prediction_window_unbounded,
+        # Do we want to remove those records whose outcome occur between index_date
+        # and the start of the prediction window
+        is_remove_index_prediction_starts=spark_args.is_remove_index_prediction_starts,
+        is_observation_window_unbounded=spark_args.is_observation_window_unbounded,
         is_population_estimation=spark_args.is_population_estimation,
         att_type=AttType(spark_args.att_type),
         exclude_demographic=spark_args.exclude_demographic,
