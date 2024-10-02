@@ -11,8 +11,8 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 from cehrbert_data.decorators import AttType
+from cehrbert_data.const.common import VISIT_OCCURRENCE
 from cehrbert_data.utils.spark_utils import (
-    VISIT_OCCURRENCE,
     build_ancestry_table_for,
     create_concept_frequency_data,
     create_hierarchical_sequence_data,
