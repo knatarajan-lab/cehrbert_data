@@ -1,4 +1,9 @@
-from cehrbert_data.const.common import MEASUREMENT, CATEGORICAL_MEASUREMENT
+from ..const.common import (
+    MEASUREMENT,
+    CATEGORICAL_MEASUREMENT,
+    MEASUREMENT_QUESTION_PREFIX,
+    MEASUREMENT_ANSWER_PREFIX
+)
 from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
@@ -135,7 +140,29 @@ class ClinicalEventDecorator(PatientEventDecorator):
         if "concept_value" not in patient_events.schema.fieldNames():
             patient_events = patient_events.withColumn("concept_value", F.lit(0.0))
 
+        # Split the categorical measurement standard_concept_id into the question/answer pairs
+        categorical_measurement_events = (
+            patient_events.where("domain = 'categorical_measurement'")
+            .withColumn("measurement_components", F.split("standard_concept_id", "-"))
+        )
+
+        categorical_measurement_events_question = categorical_measurement_events.withColumn(
+            "standard_concept_id",
+            F.concat(F.lit(MEASUREMENT_QUESTION_PREFIX), F.col("measurement_components").getItem(0))
+        ).drop("measurement_components")
+
+        categorical_measurement_events_answer = categorical_measurement_events.withColumn(
+            "standard_concept_id",
+            F.concat(F.lit(MEASUREMENT_ANSWER_PREFIX), F.col("measurement_components").getItem(1))
+        ).drop("measurement_components")
+
+        other_events = patient_events.where("domain != 'categorical_measurement'")
+
         # (cohort_member_id, person_id, standard_concept_id, date, datetime, visit_occurrence_id, domain,
         # concept_value, visit_rank_order, visit_segment, priority, date_in_week,
         # concept_value_mask, mlm_skip_value, age)
-        return patient_events
+        return other_events.unionByName(
+            categorical_measurement_events_question
+        ).unionByName(
+            categorical_measurement_events_answer
+        )
