@@ -10,7 +10,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from cehrbert_data.decorators.patient_event_decorator import AttType
+from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
     VISIT_OCCURRENCE,
     build_ancestry_table_for,

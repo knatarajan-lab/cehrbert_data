@@ -9,7 +9,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
 from cehrbert_data.const.common import DEATH, MEASUREMENT, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE
-from cehrbert_data.decorators.patient_event_decorator import AttType
+from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
     create_sequence_data,
     create_sequence_data_with_att,

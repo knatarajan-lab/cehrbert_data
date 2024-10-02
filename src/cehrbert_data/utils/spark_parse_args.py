@@ -13,7 +13,7 @@ Functions:
 import argparse
 import datetime
 
-from cehrbert_data.decorators.patient_event_decorator import AttType
+from cehrbert_data.decorators import AttType
 
 
 def valid_date(s):
