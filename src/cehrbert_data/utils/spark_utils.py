@@ -880,13 +880,17 @@ def extract_ehr_records(
     )
     if include_visit_type:
         visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
-        patient_ehr_records = patient_ehr_records.join(visit_occurrence, "visit_occurrence_id").select(
+        patient_ehr_records = patient_ehr_records.join(
+            visit_occurrence,
+            "visit_occurrence_id"
+        ).select(
             patient_ehr_records["person_id"],
             patient_ehr_records["standard_concept_id"],
             patient_ehr_records["date"],
             patient_ehr_records["datetime"],
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
+            patient_ehr_records["unit"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
         )
