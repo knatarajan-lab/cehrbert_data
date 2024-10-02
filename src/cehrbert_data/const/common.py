@@ -24,6 +24,7 @@ CDM_TABLES = [
 ]
 REQUIRED_MEASUREMENT = "required_measurement"
 UNKNOWN_CONCEPT = "[UNKNOWN]"
+NA = "N/A"
 CONCEPT = "concept"
 CONCEPT_ANCESTOR = "concept_ancestor"
 MEASUREMENT_QUESTION_PREFIX = "Question:"

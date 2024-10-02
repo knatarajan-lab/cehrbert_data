@@ -2,6 +2,7 @@ from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
 
+from ..const.common import NA
 from .token_priority import (
     YEAR_TOKEN_PRIORITY,
     AGE_TOKEN_PRIORITY,
@@ -40,7 +41,7 @@ class DemographicEventDecorator(PatientEventDecorator):
             .withColumn("concept_value_mask", F.lit(0))
             .withColumn("concept_value", F.lit(0.0))
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .where("token_order = 1")
             .drop("token_order")
         )

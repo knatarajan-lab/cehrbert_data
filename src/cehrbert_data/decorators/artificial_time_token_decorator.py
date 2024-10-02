@@ -1,5 +1,6 @@
 from pyspark.sql import DataFrame, functions as F, types as T, Window as W
 
+from ..const.common import NA
 from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN
 from .patient_event_decorator_base import (
     PatientEventDecorator, AttType,
@@ -103,7 +104,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("concept_order", F.col("min_concept_order") - 1)
             .withColumn("priority", F.lit(VS_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
         )
@@ -117,7 +118,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("concept_order", F.col("max_concept_order") + 1)
             .withColumn("priority", F.lit(VE_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
         )
@@ -161,7 +162,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("visit_concept_order", F.col("min_visit_concept_order"))
             .withColumn("concept_order", F.lit(0))
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("prev_visit_end_date", "time_delta")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
@@ -181,7 +182,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("concept_order", F.lit(0))
                 .withColumn("priority", F.lit(VISIT_TYPE_TOKEN_PRIORITY))
                 .withColumn("unit", F.lit(None).cast("string"))
-                .withColumn("event_group_id", F.lit("N/A"))
+                .withColumn("event_group_id", F.lit(NA))
                 .drop("min_visit_concept_order", "max_visit_concept_order")
                 .drop("min_concept_order", "max_concept_order")
             )
@@ -231,7 +232,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("datetime", F.expr("datetime - INTERVAL 1 MINUTE"))
             .withColumn("priority", F.lit(DISCHARGE_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("discharged_to_concept_id", "visit_end_date")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
@@ -281,7 +282,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("concept_value_mask", F.lit(0))
                 .withColumn("concept_value", F.lit(0.0))
                 .withColumn("unit", F.lit(None).cast("string"))
-                .withColumn("event_group_id", F.lit("N/A"))
+                .withColumn("event_group_id", F.lit(NA))
                 .drop("prev_date", "time_delta", "is_span_boundary")
                 .drop("prev_datetime", "hour_delta")
             )
@@ -308,7 +309,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("concept_value_mask", F.lit(0))
                 .withColumn("concept_value", F.lit(0.0))
                 .withColumn("unit", F.lit(None).cast("string"))
-                .withColumn("event_group_id", F.lit("N/A"))
+                .withColumn("event_group_id", F.lit(NA))
                 .drop("prev_date", "time_delta", "is_span_boundary")
             )
 

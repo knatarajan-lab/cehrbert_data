@@ -1,5 +1,6 @@
 from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
+from ..const.common import NA
 from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN, DEATH_TOKEN
 from .patient_event_decorator_base import (
     PatientEventDecorator,
@@ -10,7 +11,12 @@ from .patient_event_decorator_base import (
     time_mix_token,
     time_token_func
 )
-from .token_priority import VS_TOKEN_PRIORITY, VE_TOKEN_PRIORITY, ATT_TOKEN_PRIORITY, DEATH_TOKEN_PRIORITY
+from .token_priority import (
+    VS_TOKEN_PRIORITY,
+    VE_TOKEN_PRIORITY,
+    ATT_TOKEN_PRIORITY,
+    DEATH_TOKEN_PRIORITY
+)
 
 
 class DeathEventDecorator(PatientEventDecorator):
@@ -54,7 +60,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("domain", F.lit("death"))
             .withColumn("visit_rank_order", F.lit(1) + F.col("visit_rank_order"))
             .withColumn("priority", DEATH_TOKEN_PRIORITY)
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("max_visit_occurrence_id")
         )
 
@@ -63,7 +69,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", F.lit(VS_TOKEN))
             .withColumn("priority", VS_TOKEN_PRIORITY)
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
         )
 
         ve_records = (
@@ -71,7 +77,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", F.lit(VE_TOKEN))
             .withColumn("priority", VE_TOKEN_PRIORITY)
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
         )
 
         # Udf for calculating the time token
@@ -97,7 +103,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", time_token_udf("time_delta"))
             .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(None).cast("string"))
-            .withColumn("event_group_id", F.lit("N/A"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("time_delta")
         )
 
