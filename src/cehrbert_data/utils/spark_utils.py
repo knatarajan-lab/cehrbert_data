@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os.path
 from os import path
 from typing import List, Tuple
 
@@ -7,8 +8,8 @@ import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import Window as W
-from pyspark.sql.functions import broadcast
 from pyspark.sql.pandas.functions import pandas_udf
+from pyspark.sql import DataFrame
 
 from cehrbert_data.config.output_names import QUALIFIED_CONCEPT_LIST_PATH
 from cehrbert_data.const.common import (
@@ -19,16 +20,16 @@ from cehrbert_data.const.common import (
     REQUIRED_MEASUREMENT,
     UNKNOWN_CONCEPT,
     VISIT_OCCURRENCE,
+    CONCEPT,
 )
-from cehrbert_data.decorators.patient_event_decorator import (
+from cehrbert_data.decorators import (
     AttType,
     DeathEventDecorator,
-    DemographicPromptDecorator,
-    PatientEventAttDecorator,
-    PatientEventBaseDecorator,
+    DemographicEventDecorator,
+    AttEventDecorator,
+    ClinicalEventDecorator,
     time_token_func,
 )
-from cehrbert_data.queries import measurement_unit_stats_query
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
@@ -81,30 +82,36 @@ def get_key_fields(domain_table) -> List[Tuple[str, str, str, str]]:
     ]
 
 
-def get_domain_date_field(domain_table):
+def domain_has_unit(domain_table: DataFrame) -> bool:
+    for f in domain_table.schema.fieldNames():
+        if "unit_concept_id" in f:
+            return True
+    return False
+
+
+def get_domain_date_field(domain_table: DataFrame) -> str:
     # extract the domain start_date column
     return [f for f in domain_table.schema.fieldNames() if "date" in f][0]
 
 
-def get_domain_datetime_field(domain_table):
+def get_domain_datetime_field(domain_table: DataFrame) -> str:
     # extract the domain start_date column
     return [f for f in domain_table.schema.fieldNames() if "datetime" in f][0]
 
 
-def get_concept_id_field(domain_table):
+def get_concept_id_field(domain_table: DataFrame) -> str:
     return [f for f in domain_table.schema.fieldNames() if "concept_id" in f][0]
 
 
-def get_domain_field(domain_table):
+def get_domain_field(domain_table: DataFrame) -> str:
     return get_concept_id_field(domain_table).replace("_concept_id", "")
 
 
-def create_file_path(input_folder, table_name):
+def create_file_path(input_folder: str, table_name: str):
     if input_folder[-1] == "/":
         file_path = input_folder + table_name
     else:
         file_path = input_folder + "/" + table_name
-
     return file_path
 
 
@@ -112,10 +119,10 @@ def join_domain_tables(domain_tables):
     """Standardize the format of OMOP domain tables using a time frame.
 
     Keyword arguments:
-    domain_tables -- the array containing the OMOOP domain tabls except visit_occurrence
+    domain_tables -- the array containing the OMOP domain tables except visit_occurrence
         except measurement
 
-    The the output columns of the domain table is converted to the same standard format as the following
+    The output columns of the domain table is converted to the same standard format as the following
     (person_id, standard_concept_id, date, lower_bound, upper_bound, domain).
     In this case, co-occurrence is defined as those concept ids that have co-occurred
     within the same time window of a patient.
@@ -142,6 +149,7 @@ def join_domain_tables(domain_tables):
                 .withColumn("datetime", datetime_field_udf)
             )
 
+            unit_udf = F.col("unit") if domain_has_unit(sub_domain_table) else F.lit(None).cast("string")
             sub_domain_table = sub_domain_table.select(
                 sub_domain_table["person_id"],
                 sub_domain_table[concept_id_field].alias("standard_concept_id"),
@@ -150,6 +158,7 @@ def join_domain_tables(domain_tables):
                 sub_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
                 F.lit(-1).alias("concept_value"),
+                unit_udf.alias("unit"),
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence
@@ -659,20 +668,19 @@ def create_sequence_data_with_att(
         patient_events = patient_events.where(F.col("date").cast("date") >= date_filter)
 
     decorators = [
-        PatientEventBaseDecorator(visit_occurrence),
-        PatientEventAttDecorator(
+        ClinicalEventDecorator(visit_occurrence),
+        AttEventDecorator(
             visit_occurrence,
             include_visit_type,
             exclude_visit_tokens,
             att_type,
             include_inpatient_hour_token,
         ),
-        # DemographicPromptDecorator(patient_demographic),
         DeathEventDecorator(death, att_type),
     ]
 
     if not exclude_demographic:
-        decorators.append(DemographicPromptDecorator(patient_demographic, use_age_group))
+        decorators.append(DemographicEventDecorator(patient_demographic, use_age_group))
 
     for decorator in decorators:
         patient_events = decorator.decorate(patient_events)
@@ -710,6 +718,7 @@ def create_sequence_data_with_att(
         "visit_concept_order",
         "concept_order",
         "priority",
+        "unit",
     ]
     output_columns = [
         "cohort_member_id",
@@ -730,6 +739,7 @@ def create_sequence_data_with_att(
         "visit_rank_orders",
         "concept_orders",
         "record_ranks",
+        "units",
     ]
 
     patient_grouped_events = (
@@ -759,6 +769,7 @@ def create_sequence_data_with_att(
         .withColumn("concept_values", F.col("data_for_sorting.concept_value"))
         .withColumn("mlm_skip_values", F.col("data_for_sorting.mlm_skip_value"))
         .withColumn("visit_concept_ids", F.col("data_for_sorting.visit_concept_id"))
+        .withColumn("units", F.col("data_for_sorting.unit"))
     )
 
     return patient_grouped_events.select(output_columns)
@@ -837,17 +848,24 @@ def extract_ehr_records(
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
         measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
+        if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
+            raise RuntimeError(
+                f"The required_measurement table must exist in {input_folder} when measurement is included!"
+            )
         required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-        scaled_measurement = process_measurement(spark, measurement, required_measurement)
-
+        if not os.path.exists(os.path.join(input_folder, CONCEPT)):
+            raise RuntimeError(
+                f"The OMOP concept table must exist in {input_folder} when measurement is included!"
+            )
+        concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+        processed_measurement = process_measurement(spark, measurement, required_measurement, concept)
         if patient_ehr_records:
             # Union all measurement records together with other domain records
-            patient_ehr_records = patient_ehr_records.union(scaled_measurement)
+            patient_ehr_records = patient_ehr_records.union(processed_measurement)
         else:
-            patient_ehr_records = scaled_measurement
+            patient_ehr_records = processed_measurement
 
     patient_ehr_records = patient_ehr_records.where("visit_occurrence_id IS NOT NULL").distinct()
-
     person = preprocess_domain_table(spark, input_folder, PERSON)
     person = person.withColumn(
         "birth_datetime",
@@ -862,13 +880,17 @@ def extract_ehr_records(
     )
     if include_visit_type:
         visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
-        patient_ehr_records = patient_ehr_records.join(visit_occurrence, "visit_occurrence_id").select(
+        patient_ehr_records = patient_ehr_records.join(
+            visit_occurrence,
+            "visit_occurrence_id"
+        ).select(
             patient_ehr_records["person_id"],
             patient_ehr_records["standard_concept_id"],
             patient_ehr_records["date"],
             patient_ehr_records["datetime"],
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
+            patient_ehr_records["unit"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
         )
@@ -1305,38 +1327,35 @@ def create_visit_person_join(person, visit_occurrence, include_incomplete_visit=
     return visit_occurrence.join(person, "person_id")
 
 
-def process_measurement(spark, measurement, required_measurement, output_folder: str = None):
+def process_measurement(
+        spark,
+        measurement: DataFrame,
+        required_measurement: DataFrame,
+        concept: DataFrame
+):
     """
-    Remove the measurement values that are outside the 0.01-0.99 quantiles.
-
-    And scale the the
-    measurement value by substracting the mean and dividing by the standard deivation :param
+    Preprocess the measurement table and only include the measurements whose measurement_concept_ids are specified
+    in required_measurement. Add the standard unit as an additional column
 
     spark: :param
     measurement: :param
     required_measurement:
+    concept:
 
     :return:
     """
+    # Get the standard units from the concept_name
+    measurement = measurement.join(
+        concept.select("concept_id", "concept_name"), measurement.unit_concept_id == concept.concept_id, "left"
+    ).withColumn(
+        "unit", F.coalesce(F.col("concept_name"), F.lit(None).cast("string"))
+    ).drop("concept_id", "concept_name")
+
     # Register the tables in spark context
     measurement.createOrReplaceTempView(MEASUREMENT)
     required_measurement.createOrReplaceTempView(REQUIRED_MEASUREMENT)
-    measurement_unit_stats_df = spark.sql(measurement_unit_stats_query)
 
-    if output_folder:
-        measurement_unit_stats_df.repartition(10).write.mode("overwrite").parquet(
-            path.join(output_folder, "measurement_unit_stats")
-        )
-        measurement_unit_stats_df = spark.read.parquet(path.join(output_folder, "measurement_unit_stats"))
-
-    # Cache the stats in memory
-    measurement_unit_stats_df.cache()
-    # Broadcast df to local executors
-    broadcast(measurement_unit_stats_df)
-    # Create the temp view for this dataframe
-    measurement_unit_stats_df.createOrReplaceTempView("measurement_unit_stats")
-
-    scaled_numeric_lab = spark.sql(
+    numeric_lab = spark.sql(
         """
         SELECT
             m.person_id,
@@ -1345,11 +1364,9 @@ def process_measurement(spark, measurement, required_measurement, output_folder:
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            (m.value_as_number - s.value_mean) / value_stddev AS concept_value
+            m.unit, 
+            m.value_as_number AS concept_value
         FROM measurement AS m
-        JOIN measurement_unit_stats AS s
-            ON s.measurement_concept_id = m.measurement_concept_id
-                AND s.unit_concept_id = m.unit_concept_id
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
             AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
@@ -1371,6 +1388,7 @@ def process_measurement(spark, measurement, required_measurement, output_folder:
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
+            CAST(NULL AS STRING) AS unit,
             -1.0 AS concept_value
         FROM measurement AS m
         WHERE EXISTS (
@@ -1382,14 +1400,7 @@ def process_measurement(spark, measurement, required_measurement, output_folder:
         )
     """
     )
-
-    processed_measurement_df = scaled_numeric_lab.unionAll(categorical_lab)
-
-    if output_folder:
-        processed_measurement_df.write.mode("overwrite").parquet(path.join(output_folder, "processed_measurement"))
-        processed_measurement_df = spark.read.parquet(path.join(output_folder, "processed_measurement"))
-
-    return processed_measurement_df
+    return numeric_lab.unionAll(categorical_lab)
 
 
 def get_mlm_skip_domains(spark, input_folder, mlm_skip_table_list):
