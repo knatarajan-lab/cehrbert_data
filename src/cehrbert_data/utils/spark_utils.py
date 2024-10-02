@@ -1387,7 +1387,8 @@ def process_measurement(
             m.visit_occurrence_id,
             'measurement' AS domain,
             m.unit, 
-            m.value_as_number AS concept_value
+            m.value_as_number AS concept_value,
+            CONCAT('measurement-', CAST(m.measurement_id AS STRING)) AS event_group_id
         FROM measurement AS m
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
@@ -1410,7 +1411,8 @@ def process_measurement(
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
             CAST(NULL AS STRING) AS unit,
-            -1.0 AS concept_value
+            -1.0 AS concept_value,
+            CONCAT('measurement-', CAST(m.measurement_id AS STRING)) AS event_group_id
         FROM measurement AS m
         WHERE EXISTS (
             SELECT

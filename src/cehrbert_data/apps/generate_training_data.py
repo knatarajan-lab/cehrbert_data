@@ -119,10 +119,9 @@ def main(
     if MEASUREMENT in domain_table_list:
         measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
         required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-        if os.path.exists(os.path.join(input_folder, CONCEPT)):
-            concept = preprocess_domain_table(spark, input_folder, CONCEPT)
-        else:
-            concept = None
+        if not os.path.exists(os.path.join(input_folder, CONCEPT)):
+            raise ValueError("concept needs to be provided when measurement is included!")
+        concept = preprocess_domain_table(spark, input_folder, CONCEPT)
         # The select is necessary to make sure the order of the columns is the same as the
         # original dataframe, otherwise the union might use the wrong columns
         filtered_measurement = process_measurement(spark, measurement, required_measurement, concept)
