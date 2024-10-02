@@ -150,11 +150,7 @@ def join_domain_tables(domain_tables):
                 .withColumn("datetime", datetime_field_udf)
             )
 
-            if domain_has_unit(sub_domain_table):
-                pass
-            else:
-                pass
-
+            unit_udf = F.col("unit") if domain_has_unit(sub_domain_table) else F.lit(None).cast("string")
             sub_domain_table = sub_domain_table.select(
                 sub_domain_table["person_id"],
                 sub_domain_table[concept_id_field].alias("standard_concept_id"),
@@ -163,6 +159,7 @@ def join_domain_tables(domain_tables):
                 sub_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
                 F.lit(-1).alias("concept_value"),
+                unit_udf.alias("unit"),
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence

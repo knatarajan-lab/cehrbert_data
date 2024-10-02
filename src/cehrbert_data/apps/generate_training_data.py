@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from cehrbert_data.const.common import DEATH, MEASUREMENT, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE
+from cehrbert_data.const.common import DEATH, MEASUREMENT, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE, CONCEPT
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
     create_sequence_data,
@@ -18,8 +18,6 @@ from cehrbert_data.utils.spark_utils import (
     process_measurement,
     validate_table_names,
 )
-
-from build.lib.cehrbert_data.const.common import CONCEPT
 
 
 def main(
