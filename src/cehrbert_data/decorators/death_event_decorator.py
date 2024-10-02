@@ -47,9 +47,19 @@ class DeathEventDecorator(PatientEventDecorator):
             .drop("max_visit_occurrence_id")
         )
 
-        vs_records = death_records.withColumn("standard_concept_id", F.lit("VS")).withColumn("priority", F.lit(15))
+        vs_records = (
+            death_records
+            .withColumn("standard_concept_id", F.lit("VS"))
+            .withColumn("priority", F.lit(15))
+            .withColumn("unit", F.lit(None).cast("string"))
+        )
 
-        ve_records = death_records.withColumn("standard_concept_id", F.lit("VE")).withColumn("priority", F.lit(30))
+        ve_records = (
+            death_records
+            .withColumn("standard_concept_id", F.lit("VE"))
+            .withColumn("priority", F.lit(30))
+            .withColumn("unit", F.lit(None).cast("string"))
+        )
 
         # Udf for calculating the time token
         if self._att_type == AttType.DAY:
@@ -65,18 +75,19 @@ class DeathEventDecorator(PatientEventDecorator):
 
         time_token_udf = F.udf(att_func, T.StringType())
 
-        att_records = death_records.withColumn(
+        death_events = death_records.withColumn(
             "death_date",
             F.when(F.col("death_date") < F.col("date"), F.col("date")).otherwise(F.col("death_date")),
         )
-        att_records = (
-            att_records.withColumn("time_delta", F.datediff("death_date", "date"))
+        death_events = (
+            death_events.withColumn("time_delta", F.datediff("death_date", "date"))
             .withColumn("standard_concept_id", time_token_udf("time_delta"))
             .withColumn("priority", F.lit(10))
+            .withColumn("unit", F.lit(None).cast("string"))
             .drop("time_delta")
         )
 
-        new_tokens = att_records.unionByName(vs_records).unionByName(death_records).unionByName(ve_records)
+        new_tokens = death_events.unionByName(vs_records).unionByName(death_records).unionByName(ve_records)
         new_tokens = new_tokens.drop("death_date")
         self.validate(new_tokens)
 

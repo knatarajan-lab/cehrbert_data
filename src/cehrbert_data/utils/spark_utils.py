@@ -719,6 +719,7 @@ def create_sequence_data_with_att(
         "visit_concept_order",
         "concept_order",
         "priority",
+        "unit",
     ]
     output_columns = [
         "cohort_member_id",
@@ -739,6 +740,7 @@ def create_sequence_data_with_att(
         "visit_rank_orders",
         "concept_orders",
         "record_ranks",
+        "units",
     ]
 
     patient_grouped_events = (
@@ -768,6 +770,7 @@ def create_sequence_data_with_att(
         .withColumn("concept_values", F.col("data_for_sorting.concept_value"))
         .withColumn("mlm_skip_values", F.col("data_for_sorting.mlm_skip_value"))
         .withColumn("visit_concept_ids", F.col("data_for_sorting.visit_concept_id"))
+        .withColumn("units", F.col("data_for_sorting.unit"))
     )
 
     return patient_grouped_events.select(output_columns)

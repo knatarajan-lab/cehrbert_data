@@ -9,7 +9,7 @@ class ClinicalEventDecorator(PatientEventDecorator):
     #     'cohort_member_id', 'person_id', 'concept_ids', 'visit_segments', 'orders',
     #     'dates', 'ages', 'visit_concept_orders', 'num_of_visits', 'num_of_concepts',
     #     'concept_value_masks', 'concept_values', 'mlm_skip_values',
-    #     'visit_concept_ids'
+    #     'visit_concept_ids', "units"
     # ]
     def __init__(self, visit_occurrence):
         self._visit_occurrence = visit_occurrence
