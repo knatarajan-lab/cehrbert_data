@@ -20,12 +20,12 @@ from cehrbert_data.const.common import (
     UNKNOWN_CONCEPT,
     VISIT_OCCURRENCE,
 )
-from cehrbert_data.decorators.patient_event_decorator import (
+from cehrbert_data.decorators import (
     AttType,
     DeathEventDecorator,
-    DemographicPromptDecorator,
-    PatientEventAttDecorator,
-    PatientEventBaseDecorator,
+    DemographicEventDecorator,
+    AttEventDecorator,
+    ClinicalEventDecorator,
     time_token_func,
 )
 from cehrbert_data.queries import measurement_unit_stats_query
@@ -659,20 +659,19 @@ def create_sequence_data_with_att(
         patient_events = patient_events.where(F.col("date").cast("date") >= date_filter)
 
     decorators = [
-        PatientEventBaseDecorator(visit_occurrence),
-        PatientEventAttDecorator(
+        ClinicalEventDecorator(visit_occurrence),
+        AttEventDecorator(
             visit_occurrence,
             include_visit_type,
             exclude_visit_tokens,
             att_type,
             include_inpatient_hour_token,
         ),
-        # DemographicPromptDecorator(patient_demographic),
         DeathEventDecorator(death, att_type),
     ]
 
     if not exclude_demographic:
-        decorators.append(DemographicPromptDecorator(patient_demographic, use_age_group))
+        decorators.append(DemographicEventDecorator(patient_demographic, use_age_group))
 
     for decorator in decorators:
         patient_events = decorator.decorate(patient_events)
