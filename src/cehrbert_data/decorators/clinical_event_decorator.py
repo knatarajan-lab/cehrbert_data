@@ -142,7 +142,7 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         # Split the categorical measurement standard_concept_id into the question/answer pairs
         categorical_measurement_events = (
-            patient_events.where("domain = 'categorical_measurement'")
+            patient_events.where(F.col("domain") == CATEGORICAL_MEASUREMENT)
             .withColumn("measurement_components", F.split("standard_concept_id", "-"))
         )
 
@@ -156,7 +156,7 @@ class ClinicalEventDecorator(PatientEventDecorator):
             F.concat(F.lit(MEASUREMENT_ANSWER_PREFIX), F.col("measurement_components").getItem(1))
         ).drop("measurement_components")
 
-        other_events = patient_events.where("domain != 'categorical_measurement'")
+        other_events = patient_events.where(F.col("domain") != CATEGORICAL_MEASUREMENT)
 
         # (cohort_member_id, person_id, standard_concept_id, date, datetime, visit_occurrence_id, domain,
         # concept_value, visit_rank_order, visit_segment, priority, date_in_week,
