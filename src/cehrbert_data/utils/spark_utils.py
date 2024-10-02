@@ -1391,7 +1391,6 @@ def process_measurement(
         FROM measurement AS m
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
-            AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
     """
     )
 
