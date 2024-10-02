@@ -54,6 +54,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("domain", F.lit("death"))
             .withColumn("visit_rank_order", F.lit(1) + F.col("visit_rank_order"))
             .withColumn("priority", DEATH_TOKEN_PRIORITY)
+            .withColumn("event_group_id", F.lit("N/A"))
             .drop("max_visit_occurrence_id")
         )
 
@@ -62,6 +63,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", F.lit(VS_TOKEN))
             .withColumn("priority", VS_TOKEN_PRIORITY)
             .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("event_group_id", F.lit("N/A"))
         )
 
         ve_records = (
@@ -69,6 +71,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", F.lit(VE_TOKEN))
             .withColumn("priority", VE_TOKEN_PRIORITY)
             .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("event_group_id", F.lit("N/A"))
         )
 
         # Udf for calculating the time token
@@ -94,6 +97,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", time_token_udf("time_delta"))
             .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("event_group_id", F.lit("N/A"))
             .drop("time_delta")
         )
 

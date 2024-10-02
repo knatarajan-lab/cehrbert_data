@@ -37,16 +37,23 @@ DOMAIN_KEY_FIELDS = {
             "condition_concept_id",
             "condition_start_date",
             "condition_start_datetime",
-            "condition",
+            "condition"
         )
     ],
-    "procedure_occurrence_id": [("procedure_concept_id", "procedure_date", "procedure_datetime", "procedure")],
+    "procedure_occurrence_id": [
+        (
+            "procedure_concept_id",
+            "procedure_date",
+            "procedure_datetime",
+            "procedure"
+        )
+    ],
     "drug_exposure_id": [
         (
             "drug_concept_id",
             "drug_exposure_start_date",
             "drug_exposure_start_datetime",
-            "drug",
+            "drug"
         )
     ],
     "measurement_id": [
@@ -54,10 +61,10 @@ DOMAIN_KEY_FIELDS = {
             "measurement_concept_id",
             "measurement_date",
             "measurement_datetime",
-            "measurement",
+            "measurement"
         )
     ],
-    "death_date": [("person_id", "death_date", "death_datetime", "death")],
+    "death_date": [("death_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
         ("discharged_to_concept_id", "visit_end_date", "visit"),
@@ -67,7 +74,7 @@ DOMAIN_KEY_FIELDS = {
 LOGGER = logging.getLogger(__name__)
 
 
-def get_key_fields(domain_table) -> List[Tuple[str, str, str, str]]:
+def get_key_fields(domain_table: DataFrame) -> List[Tuple[str, str, str, str]]:
     field_names = domain_table.schema.fieldNames()
     for k, v in DOMAIN_KEY_FIELDS.items():
         if k in field_names:
@@ -77,7 +84,7 @@ def get_key_fields(domain_table) -> List[Tuple[str, str, str, str]]:
             get_concept_id_field(domain_table),
             get_domain_date_field(domain_table),
             get_domain_datetime_field(domain_table),
-            get_domain_field(domain_table),
+            get_domain_field(domain_table)
         )
     ]
 
@@ -87,6 +94,17 @@ def domain_has_unit(domain_table: DataFrame) -> bool:
         if "unit_concept_id" in f:
             return True
     return False
+
+
+def get_domain_id_field(domain_table: DataFrame) -> str:
+    table_fields = domain_table.schema.fieldNames()
+    candidate_id_fields = [
+        f for f in table_fields
+        if not f.endswith("_concept_id") and f.endswith("_id")
+    ]
+    if candidate_id_fields:
+        return candidate_id_fields[0]
+    raise ValueError(f"{domain_table} does not have a valid id columns: {table_fields}")
 
 
 def get_domain_date_field(domain_table: DataFrame) -> str:
@@ -115,9 +133,8 @@ def create_file_path(input_folder: str, table_name: str):
     return file_path
 
 
-def join_domain_tables(domain_tables):
+def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
     """Standardize the format of OMOP domain tables using a time frame.
-
     Keyword arguments:
     domain_tables -- the array containing the OMOP domain tables except visit_occurrence
         except measurement
@@ -136,39 +153,42 @@ def join_domain_tables(domain_tables):
                 concept_id_field,
                 date_field,
                 datetime_field,
-                table_domain_field,
+                table_domain_field
         ) in get_key_fields(domain_table):
+            domain_id_field = get_domain_id_field(domain_table)
             # Remove records that don't have a date or standard_concept_id
-            sub_domain_table = domain_table.where(F.col(date_field).isNotNull()).where(
+            filtered_domain_table = domain_table.where(F.col(date_field).isNotNull()).where(
                 F.col(concept_id_field).isNotNull()
             )
             datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field), "yyyy-MM-dd HH:mm:ss")
-            sub_domain_table = (
-                sub_domain_table.where(F.col(concept_id_field).cast("string") != "0")
+            filtered_domain_table = (
+                filtered_domain_table.where(F.col(concept_id_field).cast("string") != "0")
                 .withColumn("date", F.to_date(F.col(date_field)))
                 .withColumn("datetime", datetime_field_udf)
+                .withColumn("domain_id", F.col(domain_id_field).cast("string"))
             )
 
-            unit_udf = F.col("unit") if domain_has_unit(sub_domain_table) else F.lit(None).cast("string")
-            sub_domain_table = sub_domain_table.select(
-                sub_domain_table["person_id"],
-                sub_domain_table[concept_id_field].alias("standard_concept_id"),
-                sub_domain_table["date"].cast("date"),
-                sub_domain_table["datetime"],
-                sub_domain_table["visit_occurrence_id"],
+            unit_udf = F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(None).cast("string")
+            filtered_domain_table = filtered_domain_table.select(
+                filtered_domain_table["person_id"],
+                filtered_domain_table[concept_id_field].alias("standard_concept_id"),
+                filtered_domain_table["date"].cast("date"),
+                filtered_domain_table["datetime"],
+                filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
+                F.concat(F.lit(table_domain_field), F.lit("-"), F.col("domain_id")).alias("event_group_id"),
                 F.lit(-1).alias("concept_value"),
                 unit_udf.alias("unit"),
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence
-            if sub_domain_table == "condition_occurrence":
-                sub_domain_table = sub_domain_table.where("condition_concept_id != 4216643")
+            if filtered_domain_table == "condition_occurrence":
+                filtered_domain_table = filtered_domain_table.where("condition_concept_id != 4216643")
 
             if patient_event is None:
-                patient_event = sub_domain_table
+                patient_event = filtered_domain_table
             else:
-                patient_event = patient_event.union(sub_domain_table)
+                patient_event = patient_event.union(filtered_domain_table)
 
     return patient_event
 
@@ -692,6 +712,7 @@ def create_sequence_data_with_att(
             "concept_order",
             "priority",
             "datetime",
+            "event_group_id",
             "standard_concept_id",
         )
     )
@@ -891,6 +912,7 @@ def extract_ehr_records(
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
             patient_ehr_records["unit"],
+            patient_ehr_records["event_group_id"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
         )
@@ -1381,7 +1403,7 @@ def process_measurement(
             m.person_id,
             CASE
                 WHEN value_as_concept_id IS NOT NULL AND value_as_concept_id <> 0
-                THEN CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(value_as_concept_id AS STRING))
+                THEN CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(COALESCE(value_as_concept_id, 0) AS STRING))
                 ELSE CAST(measurement_concept_id AS STRING)
             END AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
