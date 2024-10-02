@@ -6,7 +6,7 @@ from cehrbert_data.decorators import AttType
 from ..pyspark_test_base import PySparkAbstract
 
 
-class HfReadmissionTest(PySparkAbstract):
+class GenerateTrainingDataTest(PySparkAbstract):
 
     def test_run_pyspark_app(self):
         main(
