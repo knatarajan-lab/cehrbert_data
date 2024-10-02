@@ -2,6 +2,13 @@ from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
 
+from .token_priority import (
+    YEAR_TOKEN_PRIORITY,
+    AGE_TOKEN_PRIORITY,
+    GENDER_TOKEN_PRIORITY,
+    RACE_TOKEN_PRIORITY
+)
+
 
 class DemographicEventDecorator(PatientEventDecorator):
     def __init__(self, patient_demographic, use_age_group: bool = False):
@@ -43,7 +50,7 @@ class DemographicEventDecorator(PatientEventDecorator):
                 "standard_concept_id",
                 F.concat(F.lit("year:"), F.year("date").cast(T.StringType())),
             )
-            .withColumn("priority", F.lit(-10))
+            .withColumn("priority", F.lit(YEAR_TOKEN_PRIORITY))
             .withColumn("visit_segment", F.lit(0))
             .withColumn("date_in_week", F.lit(0))
             .withColumn("age", F.lit(-1))
@@ -74,7 +81,7 @@ class DemographicEventDecorator(PatientEventDecorator):
             self._patient_demographic.select(F.col("person_id"), F.col("birth_datetime"))
             .join(sequence_start_year_token, "person_id")
             .withColumn("standard_concept_id", age_at_first_visit_udf)
-            .withColumn("priority", F.lit(-9))
+            .withColumn("priority", F.lit(AGE_TOKEN_PRIORITY))
             .drop("birth_datetime")
         )
 
@@ -82,7 +89,7 @@ class DemographicEventDecorator(PatientEventDecorator):
             self._patient_demographic.select(F.col("person_id"), F.col("gender_concept_id"))
             .join(sequence_start_year_token, "person_id")
             .withColumn("standard_concept_id", F.col("gender_concept_id").cast(T.StringType()))
-            .withColumn("priority", F.lit(-8))
+            .withColumn("priority", F.lit(GENDER_TOKEN_PRIORITY))
             .drop("gender_concept_id")
         )
 
@@ -90,7 +97,7 @@ class DemographicEventDecorator(PatientEventDecorator):
             self._patient_demographic.select(F.col("person_id"), F.col("race_concept_id"))
             .join(sequence_start_year_token, "person_id")
             .withColumn("standard_concept_id", F.col("race_concept_id").cast(T.StringType()))
-            .withColumn("priority", F.lit(-7))
+            .withColumn("priority", F.lit(RACE_TOKEN_PRIORITY))
             .drop("race_concept_id")
         )
 

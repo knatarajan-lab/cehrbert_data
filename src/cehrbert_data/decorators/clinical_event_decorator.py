@@ -2,6 +2,7 @@ from cehrbert_data.const.common import MEASUREMENT, CATEGORICAL_MEASUREMENT
 from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
+from .token_priority import DEFAULT_PRIORITY
 
 
 class ClinicalEventDecorator(PatientEventDecorator):
@@ -113,11 +114,13 @@ class ClinicalEventDecorator(PatientEventDecorator):
             .distinct()
         )
 
-        # Set the priority for the events.
-        # Create the week since epoch UDF
-        weeks_since_epoch_udf = (F.unix_timestamp("date") / F.lit(24 * 60 * 60 * 7)).cast("int")
-        patient_events = patient_events.withColumn("priority", F.lit(0)).withColumn(
-            "date_in_week", weeks_since_epoch_udf
+        # Set the priority for the events. Create the week since epoch UDF
+        patient_events = (
+            patient_events
+            .withColumn("priority", F.lit(DEFAULT_PRIORITY))
+            .withColumn(
+                "date_in_week", (F.unix_timestamp("date") / F.lit(24 * 60 * 60 * 7)).cast("int")
+            )
         )
 
         # Create the concept_value_mask field to indicate whether domain values should be skipped
