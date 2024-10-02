@@ -1,7 +1,7 @@
 import math
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, Union
+from typing import Optional, Union, Set, Callable
 
 import numpy as np
 from pyspark.sql import DataFrame
@@ -27,31 +27,30 @@ class PatientEventDecorator(ABC):
         return decorated_patient_events
 
     @classmethod
-    def get_required_columns(cls):
-        return set(
-            [
-                "cohort_member_id",
-                "person_id",
-                "standard_concept_id",
-                "date",
-                "datetime",
-                "visit_occurrence_id",
-                "domain",
-                "concept_value",
-                "visit_rank_order",
-                "visit_segment",
-                "priority",
-                "date_in_week",
-                "concept_value_mask",
-                "mlm_skip_value",
-                "age",
-                "visit_concept_id",
-                "visit_start_date",
-                "visit_start_datetime",
-                "visit_concept_order",
-                "concept_order",
-            ]
-        )
+    def get_required_columns(cls) -> Set[str]:
+        return {
+            "cohort_member_id",
+            "person_id",
+            "standard_concept_id",
+            "unit",
+            "date",
+            "datetime",
+            "visit_occurrence_id",
+            "domain",
+            "concept_value",
+            "visit_rank_order",
+            "visit_segment",
+            "priority",
+            "date_in_week",
+            "concept_value_mask",
+            "mlm_skip_value",
+            "age",
+            "visit_concept_id",
+            "visit_start_date",
+            "visit_start_datetime",
+            "visit_concept_order",
+            "concept_order"
+        }
 
     def validate(self, patient_events: DataFrame):
         actual_column_set = set(patient_events.columns)
@@ -66,7 +65,7 @@ class PatientEventDecorator(ABC):
             )
 
 
-def time_token_func(time_delta) -> Optional[str]:
+def time_token_func(time_delta: int) -> Optional[str]:
     if time_delta is None or np.isnan(time_delta):
         return None
     if time_delta < 0:
@@ -78,7 +77,7 @@ def time_token_func(time_delta) -> Optional[str]:
     return "LT"
 
 
-def time_day_token(time_delta):
+def time_day_token(time_delta: int) -> Optional[str]:
     if time_delta is None or np.isnan(time_delta):
         return None
     if time_delta < 1080:
@@ -86,7 +85,7 @@ def time_day_token(time_delta):
     return "LT"
 
 
-def time_week_token(time_delta):
+def time_week_token(time_delta: int) -> Optional[str]:
     if time_delta is None or np.isnan(time_delta):
         return None
     if time_delta < 1080:
@@ -94,7 +93,7 @@ def time_week_token(time_delta):
     return "LT"
 
 
-def time_month_token(time_delta):
+def time_month_token(time_delta: int) -> Optional[str]:
     if time_delta is None or np.isnan(time_delta):
         return None
     if time_delta < 1080:
@@ -102,7 +101,7 @@ def time_month_token(time_delta):
     return "LT"
 
 
-def time_mix_token(time_delta):
+def time_mix_token(time_delta: int) -> Optional[str]:
     #        WHEN day_diff <= 7 THEN CONCAT('D', day_diff)
     #         WHEN day_diff <= 30 THEN CONCAT('W', ceil(day_diff / 7))
     #         WHEN day_diff <= 360 THEN CONCAT('M', ceil(day_diff / 30))
@@ -128,7 +127,7 @@ def time_mix_token(time_delta):
     return "LT"
 
 
-def get_att_function(att_type: Union[AttType, str]):
+def get_att_function(att_type: Union[AttType, str]) -> Callable:
     # Convert the att_type str to the corresponding enum type
     if isinstance(att_type, str):
         att_type = AttType(att_type)
