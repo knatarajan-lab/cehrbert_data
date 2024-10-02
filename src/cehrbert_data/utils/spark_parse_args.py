@@ -114,6 +114,12 @@ def create_spark_args():
         required=True,
     )
     parser.add_argument(
+        "--continue_job",
+        dest="continue_job",
+        action="store_true",
+        help="If set, the job continues from a previous run"
+    )
+    parser.add_argument(
         "--ehr_table_list",
         dest="ehr_table_list",
         nargs="+",

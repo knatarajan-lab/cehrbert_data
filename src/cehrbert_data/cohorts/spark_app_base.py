@@ -97,6 +97,7 @@ class BaseCohortBuilder(ABC):
             age_upper_bound: int,
             prior_observation_period: int,
             post_observation_period: int,
+            continue_job: bool = False
     ):
 
         self._query_builder = query_builder
@@ -110,6 +111,7 @@ class BaseCohortBuilder(ABC):
         self._post_observation_period = post_observation_period
         cohort_name = re.sub("[^a-z0-9]+", "_", self._query_builder.get_cohort_name().lower())
         self._output_data_folder = os.path.join(self._output_folder, cohort_name)
+        self._continue_job = continue_job
 
         self.get_logger().info(
             f"query_builder: {query_builder}\n"
@@ -121,6 +123,7 @@ class BaseCohortBuilder(ABC):
             f"age_upper_bound: {age_upper_bound}\n"
             f"prior_observation_period: {prior_observation_period}\n"
             f"post_observation_period: {post_observation_period}\n"
+            f"continue_job: {continue_job}\n"
         )
 
         # Validate the age range, observation_window and prediction_window
@@ -187,6 +190,11 @@ class BaseCohortBuilder(ABC):
 
     def build(self):
         """Build the cohort and write the dataframe as parquet files to _output_data_folder."""
+
+        # Check whether the cohort has been generated
+        if self._continue_job and self.cohort_exists():
+            return self
+
         cohort = self.create_cohort()
 
         cohort = self._apply_observation_period(cohort)
@@ -200,6 +208,13 @@ class BaseCohortBuilder(ABC):
         cohort.write.mode("overwrite").parquet(self._output_data_folder)
 
         return self
+
+    def cohort_exists(self) -> bool:
+        try:
+            self.load_cohort()
+            return True
+        except Exception:
+            return False
 
     def load_cohort(self):
         return self.spark.read.parquet(self._output_data_folder)
@@ -678,6 +693,7 @@ def create_prediction_cohort(
             age_upper_bound=spark_args.age_upper_bound,
             prior_observation_period=prior_observation_period,
             post_observation_period=post_observation_period,
+            continue_job=spark_args.continue_job
         )
         .build()
         .load_cohort()
