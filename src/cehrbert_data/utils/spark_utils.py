@@ -10,15 +10,17 @@ import pyspark.sql.types as T
 from pyspark.sql import Window as W
 from pyspark.sql.functions import broadcast
 from pyspark.sql.pandas.functions import pandas_udf
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 
 from cehrbert_data.config.output_names import QUALIFIED_CONCEPT_LIST_PATH
 from cehrbert_data.const.common import (
+    MEASUREMENT,
+    PROCESSED_MEASUREMENT,
+    REQUIRED_MEASUREMENT,
+    NUMERIC_MEASUREMENT_STATS,
     CATEGORICAL_MEASUREMENT,
     CDM_TABLES,
-    MEASUREMENT,
     PERSON,
-    REQUIRED_MEASUREMENT,
     UNKNOWN_CONCEPT,
     VISIT_OCCURRENCE,
     CONCEPT,
@@ -31,7 +33,6 @@ from cehrbert_data.decorators import (
     ClinicalEventDecorator,
     time_token_func,
 )
-from cehrbert_data.queries import measurement_unit_stats_query
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
@@ -868,18 +869,9 @@ def extract_ehr_records(
 
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
-        measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
-        if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
-            raise RuntimeError(
-                f"The required_measurement table must exist in {input_folder} when measurement is included!"
-            )
-        required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-        if not os.path.exists(os.path.join(input_folder, CONCEPT)):
-            raise RuntimeError(
-                f"The OMOP concept table must exist in {input_folder} when measurement is included!"
-            )
-        concept = preprocess_domain_table(spark, input_folder, CONCEPT)
-        processed_measurement = process_measurement(spark, measurement, required_measurement, concept)
+        processed_measurement = get_measurement_table(
+            spark, input_folder
+        )
         if patient_ehr_records:
             # Union all measurement records together with other domain records
             patient_ehr_records = patient_ehr_records.union(processed_measurement)
@@ -1359,10 +1351,49 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
     )
 
 
+def get_measurement_table(
+        spark: SparkSession,
+        input_folder: str
+) -> DataFrame:
+    """
+    A helper function to process and create the measurement table
+
+    :param spark:
+    :param input_folder:
+    :return:
+    """
+
+    measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
+    # The required_measurement table must exist
+    if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
+        raise RuntimeError(f"{REQUIRED_MEASUREMENT} needs to be provided when measurement is included!")
+    required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
+    # The measurement_stats table must exist
+    if not os.path.exists(os.path.join(input_folder, NUMERIC_MEASUREMENT_STATS)):
+        raise RuntimeError(f"{NUMERIC_MEASUREMENT_STATS} needs to be provided when measurement is included!")
+    measurement_stats = preprocess_domain_table(spark, input_folder, NUMERIC_MEASUREMENT_STATS)
+    # The concept table must exist
+    if not os.path.exists(os.path.join(input_folder, CONCEPT)):
+        raise RuntimeError(f"{CONCEPT} needs to be provided when measurement is included!")
+    concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+    # The select is necessary to make sure the order of the columns is the same as the
+    # original dataframe, otherwise the union might use the wrong columns
+    if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)):
+        processed_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
+    else:
+        processed_measurement = process_measurement(
+            spark, measurement, required_measurement, measurement_stats, concept
+        )
+        processed_measurement.write.parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
+
+    return processed_measurement
+
+
 def process_measurement(
         spark,
         measurement: DataFrame,
         required_measurement: DataFrame,
+        measurement_stats: DataFrame,
         concept: DataFrame
 ):
     """
@@ -1382,19 +1413,17 @@ def process_measurement(
             concept.select("concept_id", "concept_code"),
             measurement.unit_concept_id == concept.concept_id,
             "left"
-        ).drop("concept_id", "concept_name")
+        ).withColumn("unit", F.col("concept_code"))
+        .drop("concept_id", "concept_code")
     )
 
     # Register the tables in spark context
     measurement.createOrReplaceTempView(MEASUREMENT)
     required_measurement.createOrReplaceTempView(REQUIRED_MEASUREMENT)
-    measurement_unit_stats_df = spark.sql(measurement_unit_stats_query)
-    # Cache the stats in memory
-    measurement_unit_stats_df.cache()
     # Broadcast df to local executors
-    broadcast(measurement_unit_stats_df)
+    broadcast(measurement_stats)
     # Create the temp view for this dataframe
-    measurement_unit_stats_df.createOrReplaceTempView("measurement_unit_stats")
+    measurement_stats.createOrReplaceTempView("measurement_unit_stats")
 
     numeric_lab = spark.sql(
         """

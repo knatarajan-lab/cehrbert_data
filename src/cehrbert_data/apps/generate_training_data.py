@@ -12,10 +12,7 @@ from cehrbert_data.const.common import (
     PERSON,
     VISIT_OCCURRENCE,
     DEATH,
-    MEASUREMENT,
-    PROCESSED_MEASUREMENT,
-    REQUIRED_MEASUREMENT,
-    CONCEPT
+    MEASUREMENT
 )
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
@@ -23,7 +20,7 @@ from cehrbert_data.utils.spark_utils import (
     create_sequence_data_with_att,
     join_domain_tables,
     preprocess_domain_table,
-    process_measurement,
+    get_measurement_table,
     validate_table_names,
 )
 
@@ -125,20 +122,7 @@ def main(
 
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
-        measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
-        if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
-            raise ValueError(f"{REQUIRED_MEASUREMENT} needs to be provided when measurement is included!")
-        required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-        if not os.path.exists(os.path.join(input_folder, CONCEPT)):
-            raise ValueError(f"{CONCEPT} needs to be provided when measurement is included!")
-        concept = preprocess_domain_table(spark, input_folder, CONCEPT)
-        # The select is necessary to make sure the order of the columns is the same as the
-        # original dataframe, otherwise the union might use the wrong columns
-        if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)):
-            filtered_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
-        else:
-            filtered_measurement = process_measurement(spark, measurement, required_measurement, concept)
-
+        filtered_measurement = get_measurement_table(spark, input_folder)
         if patient_events:
             # Union all measurement records together with other domain records
             patient_events = patient_events.unionByName(filtered_measurement)

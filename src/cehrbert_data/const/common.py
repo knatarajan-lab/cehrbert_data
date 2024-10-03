@@ -24,6 +24,7 @@ CDM_TABLES = [
     DEATH,
 ]
 REQUIRED_MEASUREMENT = "required_measurement"
+NUMERIC_MEASUREMENT_STATS = "numeric_measurement_stats"
 UNKNOWN_CONCEPT = "[UNKNOWN]"
 NA = "N/A"
 CONCEPT = "concept"
