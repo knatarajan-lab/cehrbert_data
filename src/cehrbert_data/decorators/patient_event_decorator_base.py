@@ -49,7 +49,8 @@ class PatientEventDecorator(ABC):
             "visit_start_date",
             "visit_start_datetime",
             "visit_concept_order",
-            "concept_order"
+            "concept_order",
+            "event_group_id"
         }
 
     def validate(self, patient_events: DataFrame):

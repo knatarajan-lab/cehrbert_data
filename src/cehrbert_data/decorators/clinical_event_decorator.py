@@ -1,7 +1,13 @@
-from cehrbert_data.const.common import MEASUREMENT, CATEGORICAL_MEASUREMENT
+from ..const.common import (
+    MEASUREMENT,
+    CATEGORICAL_MEASUREMENT,
+    MEASUREMENT_QUESTION_PREFIX,
+    MEASUREMENT_ANSWER_PREFIX
+)
 from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
+from .token_priority import DEFAULT_PRIORITY
 
 
 class ClinicalEventDecorator(PatientEventDecorator):
@@ -113,11 +119,13 @@ class ClinicalEventDecorator(PatientEventDecorator):
             .distinct()
         )
 
-        # Set the priority for the events.
-        # Create the week since epoch UDF
-        weeks_since_epoch_udf = (F.unix_timestamp("date") / F.lit(24 * 60 * 60 * 7)).cast("int")
-        patient_events = patient_events.withColumn("priority", F.lit(0)).withColumn(
-            "date_in_week", weeks_since_epoch_udf
+        # Set the priority for the events. Create the week since epoch UDF
+        patient_events = (
+            patient_events
+            .withColumn("priority", F.lit(DEFAULT_PRIORITY))
+            .withColumn(
+                "date_in_week", (F.unix_timestamp("date") / F.lit(24 * 60 * 60 * 7)).cast("int")
+            )
         )
 
         # Create the concept_value_mask field to indicate whether domain values should be skipped
@@ -132,7 +140,29 @@ class ClinicalEventDecorator(PatientEventDecorator):
         if "concept_value" not in patient_events.schema.fieldNames():
             patient_events = patient_events.withColumn("concept_value", F.lit(0.0))
 
+        # Split the categorical measurement standard_concept_id into the question/answer pairs
+        categorical_measurement_events = (
+            patient_events.where(F.col("domain") == CATEGORICAL_MEASUREMENT)
+            .withColumn("measurement_components", F.split("standard_concept_id", "-"))
+        )
+
+        categorical_measurement_events_question = categorical_measurement_events.withColumn(
+            "standard_concept_id",
+            F.concat(F.lit(MEASUREMENT_QUESTION_PREFIX), F.col("measurement_components").getItem(0))
+        ).drop("measurement_components")
+
+        categorical_measurement_events_answer = categorical_measurement_events.withColumn(
+            "standard_concept_id",
+            F.concat(F.lit(MEASUREMENT_ANSWER_PREFIX), F.col("measurement_components").getItem(1))
+        ).drop("measurement_components")
+
+        other_events = patient_events.where(F.col("domain") != CATEGORICAL_MEASUREMENT)
+
         # (cohort_member_id, person_id, standard_concept_id, date, datetime, visit_occurrence_id, domain,
         # concept_value, visit_rank_order, visit_segment, priority, date_in_week,
         # concept_value_mask, mlm_skip_value, age)
-        return patient_events
+        return other_events.unionByName(
+            categorical_measurement_events_question
+        ).unionByName(
+            categorical_measurement_events_answer
+        )

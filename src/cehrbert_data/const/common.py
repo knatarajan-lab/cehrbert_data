@@ -6,6 +6,7 @@ DRUG_EXPOSURE = "drug_exposure"
 DEVICE_EXPOSURE = "device_exposure"
 OBSERVATION = "observation"
 MEASUREMENT = "measurement"
+PROCESSED_MEASUREMENT = "processed_measurement"
 CATEGORICAL_MEASUREMENT = "categorical_measurement"
 OBSERVATION_PERIOD = "observation_period"
 DEATH = "death"
@@ -23,6 +24,10 @@ CDM_TABLES = [
     DEATH,
 ]
 REQUIRED_MEASUREMENT = "required_measurement"
+NUMERIC_MEASUREMENT_STATS = "numeric_measurement_stats"
 UNKNOWN_CONCEPT = "[UNKNOWN]"
+NA = "N/A"
 CONCEPT = "concept"
 CONCEPT_ANCESTOR = "concept_ancestor"
+MEASUREMENT_QUESTION_PREFIX = "1-Question:"
+MEASUREMENT_ANSWER_PREFIX = "2-Answer:"

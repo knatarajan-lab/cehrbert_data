@@ -8,14 +8,19 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from cehrbert_data.const.common import DEATH, MEASUREMENT, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE, CONCEPT
+from cehrbert_data.const.common import (
+    PERSON,
+    VISIT_OCCURRENCE,
+    DEATH,
+    MEASUREMENT
+)
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
     create_sequence_data,
     create_sequence_data_with_att,
     join_domain_tables,
     preprocess_domain_table,
-    process_measurement,
+    get_measurement_table,
     validate_table_names,
 )
 
@@ -41,6 +46,7 @@ def main(
         with_drug_rollup: bool = True,
         include_inpatient_hour_token: bool = False,
         continue_from_events: bool = False,
+        refresh_measurement: bool = False
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -63,6 +69,7 @@ def main(
         f"exclude_demographic: {exclude_demographic}\n"
         f"use_age_group: {use_age_group}\n"
         f"with_drug_rollup: {with_drug_rollup}\n"
+        f"refresh_measurement: {refresh_measurement}\n"
     )
 
     domain_tables = []
@@ -117,21 +124,16 @@ def main(
 
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
-        measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
-        required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-        if os.path.exists(os.path.join(input_folder, CONCEPT)):
-            concept = preprocess_domain_table(spark, input_folder, CONCEPT)
-        else:
-            concept = None
-        # The select is necessary to make sure the order of the columns is the same as the
-        # original dataframe, otherwise the union might use the wrong columns
-        filtered_measurement = process_measurement(spark, measurement, required_measurement, concept)
-
+        processed_measurement = get_measurement_table(
+            spark,
+            input_folder,
+            refresh=refresh_measurement
+        )
         if patient_events:
             # Union all measurement records together with other domain records
-            patient_events = patient_events.unionByName(filtered_measurement)
+            patient_events = patient_events.unionByName(processed_measurement)
         else:
-            patient_events = filtered_measurement
+            patient_events = processed_measurement
 
     patient_events = (
         patient_events.join(visit_occurrence_person, "visit_occurrence_id")
@@ -210,17 +212,21 @@ def main(
     patient_splits_folder = os.path.join(input_folder, "patient_splits")
     if os.path.exists(patient_splits_folder):
         patient_splits = spark.read.parquet(patient_splits_folder)
-        sequence_data.join(patient_splits, "person_id").write.mode("overwrite").parquet(
-            os.path.join(output_folder, "patient_sequence", "temp")
+        temp_folder = os.path.join(output_folder, "patient_sequence", "temp")
+        sequence_data.join(
+            patient_splits.select("person_id", "split"),
+            "person_id"
+        ).write.mode("overwrite").parquet(
+            temp_folder
         )
-        sequence_data = spark.read.parquet(os.path.join(output_folder, "patient_sequence", "temp"))
+        sequence_data = spark.read.parquet(temp_folder)
         sequence_data.where('split="train"').write.mode("overwrite").parquet(
             os.path.join(output_folder, "patient_sequence/train")
         )
         sequence_data.where('split="test"').write.mode("overwrite").parquet(
             os.path.join(output_folder, "patient_sequence/test")
         )
-        shutil.rmtree(os.path.join(output_folder, "patient_sequence", "temp"))
+        shutil.rmtree(temp_folder)
     else:
         sequence_data.write.mode("overwrite").parquet(os.path.join(output_folder, "patient_sequence"))
 
@@ -308,7 +314,16 @@ if __name__ == "__main__":
         dest="include_inpatient_hour_token",
         action="store_true",
     )
-    parser.add_argument("--continue_from_events", dest="continue_from_events", action="store_true")
+    parser.add_argument(
+        "--continue_from_events",
+        dest="continue_from_events",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--refresh_measurement",
+        dest="refresh_measurement",
+        action="store_true"
+    )
     parser.add_argument(
         "--att_type",
         dest="att_type",
@@ -338,4 +353,5 @@ if __name__ == "__main__":
         with_drug_rollup=ARGS.with_drug_rollup,
         include_inpatient_hour_token=ARGS.include_inpatient_hour_token,
         continue_from_events=ARGS.continue_from_events,
+        refresh_measurement=ARGS.refresh_measurement,
     )

@@ -1,7 +1,22 @@
 from pyspark.sql import DataFrame, functions as F, Window as W, types as T
 
-from .patient_event_decorator_base import PatientEventDecorator, AttType, time_day_token, \
-    time_week_token, time_month_token, time_mix_token, time_token_func
+from ..const.common import NA
+from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN, DEATH_TOKEN
+from .patient_event_decorator_base import (
+    PatientEventDecorator,
+    AttType,
+    time_day_token,
+    time_week_token,
+    time_month_token,
+    time_mix_token,
+    time_token_func
+)
+from .token_priority import (
+    VS_TOKEN_PRIORITY,
+    VE_TOKEN_PRIORITY,
+    ATT_TOKEN_PRIORITY,
+    DEATH_TOKEN_PRIORITY
+)
 
 
 class DeathEventDecorator(PatientEventDecorator):
@@ -18,7 +33,7 @@ class DeathEventDecorator(PatientEventDecorator):
         max_visit_occurrence_id = death_records.select(F.max("visit_occurrence_id").alias("max_visit_occurrence_id"))
 
         last_ve_record = (
-            death_records.where(F.col("standard_concept_id") == "VE")
+            death_records.where(F.col("standard_concept_id") == VE_TOKEN)
             .withColumn(
                 "record_rank",
                 F.row_number().over(W.partitionBy("person_id", "cohort_member_id").orderBy(F.desc("date"))),
@@ -37,28 +52,32 @@ class DeathEventDecorator(PatientEventDecorator):
         artificial_visit_id = F.row_number().over(
             W.partitionBy(F.lit(0)).orderBy("person_id", "cohort_member_id")
         ) + F.col("max_visit_occurrence_id")
+
         death_records = (
             last_ve_record.crossJoin(max_visit_occurrence_id)
             .withColumn("visit_occurrence_id", artificial_visit_id)
-            .withColumn("standard_concept_id", F.lit("[DEATH]"))
+            .withColumn("standard_concept_id", F.lit(DEATH_TOKEN))
             .withColumn("domain", F.lit("death"))
             .withColumn("visit_rank_order", F.lit(1) + F.col("visit_rank_order"))
-            .withColumn("priority", F.lit(20))
+            .withColumn("priority", DEATH_TOKEN_PRIORITY)
+            .withColumn("event_group_id", F.lit(NA))
             .drop("max_visit_occurrence_id")
         )
 
         vs_records = (
             death_records
-            .withColumn("standard_concept_id", F.lit("VS"))
-            .withColumn("priority", F.lit(15))
+            .withColumn("standard_concept_id", F.lit(VS_TOKEN))
+            .withColumn("priority", VS_TOKEN_PRIORITY)
             .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("event_group_id", F.lit(NA))
         )
 
         ve_records = (
             death_records
-            .withColumn("standard_concept_id", F.lit("VE"))
-            .withColumn("priority", F.lit(30))
+            .withColumn("standard_concept_id", F.lit(VE_TOKEN))
+            .withColumn("priority", VE_TOKEN_PRIORITY)
             .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("event_group_id", F.lit(NA))
         )
 
         # Udf for calculating the time token
@@ -82,8 +101,9 @@ class DeathEventDecorator(PatientEventDecorator):
         death_events = (
             death_events.withColumn("time_delta", F.datediff("death_date", "date"))
             .withColumn("standard_concept_id", time_token_udf("time_delta"))
-            .withColumn("priority", F.lit(10))
+            .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("event_group_id", F.lit(NA))
             .drop("time_delta")
         )
 

@@ -8,16 +8,19 @@ import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import Window as W
+from pyspark.sql.functions import broadcast
 from pyspark.sql.pandas.functions import pandas_udf
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 
 from cehrbert_data.config.output_names import QUALIFIED_CONCEPT_LIST_PATH
 from cehrbert_data.const.common import (
+    MEASUREMENT,
+    PROCESSED_MEASUREMENT,
+    REQUIRED_MEASUREMENT,
+    NUMERIC_MEASUREMENT_STATS,
     CATEGORICAL_MEASUREMENT,
     CDM_TABLES,
-    MEASUREMENT,
     PERSON,
-    REQUIRED_MEASUREMENT,
     UNKNOWN_CONCEPT,
     VISIT_OCCURRENCE,
     CONCEPT,
@@ -37,16 +40,23 @@ DOMAIN_KEY_FIELDS = {
             "condition_concept_id",
             "condition_start_date",
             "condition_start_datetime",
-            "condition",
+            "condition"
         )
     ],
-    "procedure_occurrence_id": [("procedure_concept_id", "procedure_date", "procedure_datetime", "procedure")],
+    "procedure_occurrence_id": [
+        (
+            "procedure_concept_id",
+            "procedure_date",
+            "procedure_datetime",
+            "procedure"
+        )
+    ],
     "drug_exposure_id": [
         (
             "drug_concept_id",
             "drug_exposure_start_date",
             "drug_exposure_start_datetime",
-            "drug",
+            "drug"
         )
     ],
     "measurement_id": [
@@ -54,10 +64,10 @@ DOMAIN_KEY_FIELDS = {
             "measurement_concept_id",
             "measurement_date",
             "measurement_datetime",
-            "measurement",
+            "measurement"
         )
     ],
-    "death_date": [("person_id", "death_date", "death_datetime", "death")],
+    "death_date": [("death_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
         ("discharged_to_concept_id", "visit_end_date", "visit"),
@@ -67,7 +77,7 @@ DOMAIN_KEY_FIELDS = {
 LOGGER = logging.getLogger(__name__)
 
 
-def get_key_fields(domain_table) -> List[Tuple[str, str, str, str]]:
+def get_key_fields(domain_table: DataFrame) -> List[Tuple[str, str, str, str]]:
     field_names = domain_table.schema.fieldNames()
     for k, v in DOMAIN_KEY_FIELDS.items():
         if k in field_names:
@@ -77,7 +87,7 @@ def get_key_fields(domain_table) -> List[Tuple[str, str, str, str]]:
             get_concept_id_field(domain_table),
             get_domain_date_field(domain_table),
             get_domain_datetime_field(domain_table),
-            get_domain_field(domain_table),
+            get_domain_field(domain_table)
         )
     ]
 
@@ -87,6 +97,17 @@ def domain_has_unit(domain_table: DataFrame) -> bool:
         if "unit_concept_id" in f:
             return True
     return False
+
+
+def get_domain_id_field(domain_table: DataFrame) -> str:
+    table_fields = domain_table.schema.fieldNames()
+    candidate_id_fields = [
+        f for f in table_fields
+        if not f.endswith("_concept_id") and f.endswith("_id")
+    ]
+    if candidate_id_fields:
+        return candidate_id_fields[0]
+    raise ValueError(f"{domain_table} does not have a valid id columns: {table_fields}")
 
 
 def get_domain_date_field(domain_table: DataFrame) -> str:
@@ -115,9 +136,8 @@ def create_file_path(input_folder: str, table_name: str):
     return file_path
 
 
-def join_domain_tables(domain_tables):
+def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
     """Standardize the format of OMOP domain tables using a time frame.
-
     Keyword arguments:
     domain_tables -- the array containing the OMOP domain tables except visit_occurrence
         except measurement
@@ -136,39 +156,40 @@ def join_domain_tables(domain_tables):
                 concept_id_field,
                 date_field,
                 datetime_field,
-                table_domain_field,
+                table_domain_field
         ) in get_key_fields(domain_table):
             # Remove records that don't have a date or standard_concept_id
-            sub_domain_table = domain_table.where(F.col(date_field).isNotNull()).where(
+            filtered_domain_table = domain_table.where(F.col(date_field).isNotNull()).where(
                 F.col(concept_id_field).isNotNull()
             )
             datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field), "yyyy-MM-dd HH:mm:ss")
-            sub_domain_table = (
-                sub_domain_table.where(F.col(concept_id_field).cast("string") != "0")
+            filtered_domain_table = (
+                filtered_domain_table.where(F.col(concept_id_field).cast("string") != "0")
                 .withColumn("date", F.to_date(F.col(date_field)))
                 .withColumn("datetime", datetime_field_udf)
             )
 
-            unit_udf = F.col("unit") if domain_has_unit(sub_domain_table) else F.lit(None).cast("string")
-            sub_domain_table = sub_domain_table.select(
-                sub_domain_table["person_id"],
-                sub_domain_table[concept_id_field].alias("standard_concept_id"),
-                sub_domain_table["date"].cast("date"),
-                sub_domain_table["datetime"],
-                sub_domain_table["visit_occurrence_id"],
+            unit_udf = F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(None).cast("string")
+            filtered_domain_table = filtered_domain_table.select(
+                filtered_domain_table["person_id"],
+                filtered_domain_table[concept_id_field].alias("standard_concept_id"),
+                filtered_domain_table["date"].cast("date"),
+                filtered_domain_table["datetime"],
+                filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
-                F.lit(-1).alias("concept_value"),
+                F.lit(None).cast("string").alias("event_group_id"),
+                F.lit(0.0).alias("concept_value"),
                 unit_udf.alias("unit"),
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence
-            if sub_domain_table == "condition_occurrence":
-                sub_domain_table = sub_domain_table.where("condition_concept_id != 4216643")
+            if filtered_domain_table == "condition_occurrence":
+                filtered_domain_table = filtered_domain_table.where("condition_concept_id != 4216643")
 
             if patient_event is None:
-                patient_event = sub_domain_table
+                patient_event = filtered_domain_table
             else:
-                patient_event = patient_event.union(sub_domain_table)
+                patient_event = patient_event.union(filtered_domain_table)
 
     return patient_event
 
@@ -692,6 +713,7 @@ def create_sequence_data_with_att(
             "concept_order",
             "priority",
             "datetime",
+            "event_group_id",
             "standard_concept_id",
         )
     )
@@ -810,6 +832,7 @@ def extract_ehr_records(
         with_diagnosis_rollup=False,
         with_drug_rollup=True,
         include_concept_list=False,
+        refresh_measurement=False
 ):
     """
     Extract the ehr records for domain_table_list from input_folder.
@@ -821,6 +844,7 @@ def extract_ehr_records(
     :param with_diagnosis_rollup: whether ot not to roll up the diagnosis concepts to the parent levels
     :param with_drug_rollup: whether ot not to roll up the drug concepts to the parent levels
     :param include_concept_list:
+    :param refresh_measurement:
     :return:
     """
     domain_tables = []
@@ -847,18 +871,11 @@ def extract_ehr_records(
 
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
-        measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
-        if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
-            raise RuntimeError(
-                f"The required_measurement table must exist in {input_folder} when measurement is included!"
-            )
-        required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-        if not os.path.exists(os.path.join(input_folder, CONCEPT)):
-            raise RuntimeError(
-                f"The OMOP concept table must exist in {input_folder} when measurement is included!"
-            )
-        concept = preprocess_domain_table(spark, input_folder, CONCEPT)
-        processed_measurement = process_measurement(spark, measurement, required_measurement, concept)
+        processed_measurement = get_measurement_table(
+            spark,
+            input_folder,
+            refresh=refresh_measurement
+        )
         if patient_ehr_records:
             # Union all measurement records together with other domain records
             patient_ehr_records = patient_ehr_records.union(processed_measurement)
@@ -891,6 +908,7 @@ def extract_ehr_records(
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
             patient_ehr_records["unit"],
+            patient_ehr_records["event_group_id"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
         )
@@ -1327,10 +1345,62 @@ def create_visit_person_join(person, visit_occurrence, include_incomplete_visit=
     return visit_occurrence.join(person, "person_id")
 
 
+def clean_up_unit(dataframe: DataFrame) -> DataFrame:
+    return dataframe.withColumn(
+        "unit",
+        F.regexp_replace(F.col("unit"), r"\{.*?\}", "")
+    ).withColumn(
+        "unit",
+        F.regexp_replace(F.col("unit"), r"^/", "1/")
+    )
+
+
+def get_measurement_table(
+        spark: SparkSession,
+        input_folder: str,
+        refresh: bool = False
+) -> DataFrame:
+    """
+    A helper function to process and create the measurement table
+
+    :param spark:
+    :param input_folder:
+    :param refresh:
+
+    :return:
+    """
+
+    measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
+    # The required_measurement table must exist
+    if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
+        raise RuntimeError(f"{REQUIRED_MEASUREMENT} needs to be provided when measurement is included!")
+    required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
+    # The measurement_stats table must exist
+    if not os.path.exists(os.path.join(input_folder, NUMERIC_MEASUREMENT_STATS)):
+        raise RuntimeError(f"{NUMERIC_MEASUREMENT_STATS} needs to be provided when measurement is included!")
+    measurement_stats = preprocess_domain_table(spark, input_folder, NUMERIC_MEASUREMENT_STATS)
+    # The concept table must exist
+    if not os.path.exists(os.path.join(input_folder, CONCEPT)):
+        raise RuntimeError(f"{CONCEPT} needs to be provided when measurement is included!")
+    concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+    # The select is necessary to make sure the order of the columns is the same as the
+    # original dataframe, otherwise the union might use the wrong columns
+    if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)) and not refresh:
+        processed_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
+    else:
+        processed_measurement = process_measurement(
+            spark, measurement, required_measurement, measurement_stats, concept
+        )
+        processed_measurement.write.parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
+
+    return processed_measurement
+
+
 def process_measurement(
         spark,
         measurement: DataFrame,
         required_measurement: DataFrame,
+        measurement_stats: DataFrame,
         concept: DataFrame
 ):
     """
@@ -1344,17 +1414,14 @@ def process_measurement(
 
     :return:
     """
-    # Get the standard units from the concept_name
-    measurement = measurement.join(
-        concept.select("concept_id", "concept_name"), measurement.unit_concept_id == concept.concept_id, "left"
-    ).withColumn(
-        "unit", F.coalesce(F.col("concept_name"), F.lit(None).cast("string"))
-    ).drop("concept_id", "concept_name")
-
     # Register the tables in spark context
+    concept.createOrReplaceTempView(CONCEPT)
     measurement.createOrReplaceTempView(MEASUREMENT)
     required_measurement.createOrReplaceTempView(REQUIRED_MEASUREMENT)
-
+    # Broadcast df to local executors
+    broadcast(measurement_stats)
+    # Create the temp view for this dataframe
+    measurement_stats.createOrReplaceTempView("measurement_unit_stats")
     numeric_lab = spark.sql(
         """
         SELECT
@@ -1364,14 +1431,20 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            m.unit, 
-            m.value_as_number AS concept_value
+            c.concept_code AS unit, 
+            m.value_as_number AS concept_value,
+            CAST(NULL AS STRING) AS event_group_id
         FROM measurement AS m
+        JOIN measurement_unit_stats AS s
+            ON s.measurement_concept_id = m.measurement_concept_id AND s.unit_concept_id = m.unit_concept_id
+        JOIN concept AS c
+            ON m.unit_concept_id = c.concept_id
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
             AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
     """
     )
+    numeric_lab = clean_up_unit(numeric_lab)
 
     # For categorical measurements in required_measurement, we concatenate measurement_concept_id
     # with value_as_concept_id to construct a new standard_concept_id
@@ -1381,7 +1454,7 @@ def process_measurement(
             m.person_id,
             CASE
                 WHEN value_as_concept_id IS NOT NULL AND value_as_concept_id <> 0
-                THEN CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(value_as_concept_id AS STRING))
+                THEN CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(COALESCE(value_as_concept_id, 0) AS STRING))
                 ELSE CAST(measurement_concept_id AS STRING)
             END AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
@@ -1389,7 +1462,8 @@ def process_measurement(
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
             CAST(NULL AS STRING) AS unit,
-            -1.0 AS concept_value
+            0.0 AS concept_value,
+            CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id
         FROM measurement AS m
         WHERE EXISTS (
             SELECT

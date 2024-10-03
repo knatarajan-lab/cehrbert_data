@@ -1,0 +1,3 @@
+VS_TOKEN = "[VS]"
+VE_TOKEN = "[VE]"
+DEATH_TOKEN = "[DEATH]"
