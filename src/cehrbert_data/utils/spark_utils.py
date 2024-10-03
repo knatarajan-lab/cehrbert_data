@@ -1407,24 +1407,14 @@ def process_measurement(
 
     :return:
     """
-    # Get the standard units from the concept_name
-    measurement = clean_up_unit(
-        measurement.join(
-            concept.select("concept_id", "concept_code"),
-            measurement.unit_concept_id == concept.concept_id,
-            "left"
-        ).withColumn("unit", F.col("concept_code"))
-        .drop("concept_id", "concept_code")
-    )
-
     # Register the tables in spark context
+    concept.createOrReplaceTempView(CONCEPT)
     measurement.createOrReplaceTempView(MEASUREMENT)
     required_measurement.createOrReplaceTempView(REQUIRED_MEASUREMENT)
     # Broadcast df to local executors
     broadcast(measurement_stats)
     # Create the temp view for this dataframe
     measurement_stats.createOrReplaceTempView("measurement_unit_stats")
-
     numeric_lab = spark.sql(
         """
         SELECT
@@ -1434,18 +1424,20 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            m.unit, 
+            c.concept_code AS unit, 
             m.value_as_number AS concept_value,
             CAST(NULL AS STRING) AS event_group_id
         FROM measurement AS m
         JOIN measurement_unit_stats AS s
-            ON s.measurement_concept_id = m.measurement_concept_id
-                AND s.unit_concept_id = m.unit_concept_id
+            ON s.measurement_concept_id = m.measurement_concept_id AND s.unit_concept_id = m.unit_concept_id
+        JOIN concept AS c
+            ON m.unit_concept_id = c.concept_id
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
             AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
     """
     )
+    numeric_lab = clean_up_unit(numeric_lab)
 
     # For categorical measurements in required_measurement, we concatenate measurement_concept_id
     # with value_as_concept_id to construct a new standard_concept_id
