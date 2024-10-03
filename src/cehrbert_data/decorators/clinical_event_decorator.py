@@ -148,12 +148,12 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         categorical_measurement_events_question = categorical_measurement_events.withColumn(
             "standard_concept_id",
-            F.concat(F.lit(MEASUREMENT_QUESTION_PREFIX), F.col("measurement_components").getItem(0))
+            F.concat(F.lit("1-"), F.lit(MEASUREMENT_QUESTION_PREFIX), F.col("measurement_components").getItem(0))
         ).drop("measurement_components")
 
         categorical_measurement_events_answer = categorical_measurement_events.withColumn(
             "standard_concept_id",
-            F.concat(F.lit(MEASUREMENT_ANSWER_PREFIX), F.col("measurement_components").getItem(1))
+            F.concat(F.lit("2-"), F.lit(MEASUREMENT_ANSWER_PREFIX), F.col("measurement_components").getItem(1))
         ).drop("measurement_components")
 
         other_events = patient_events.where(F.col("domain") != CATEGORICAL_MEASUREMENT)

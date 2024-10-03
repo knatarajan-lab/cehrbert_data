@@ -192,10 +192,14 @@ class AttEventDecorator(PatientEventDecorator):
         artificial_tokens = artificial_tokens.drop("visit_end_date")
 
         # Retrieving the events that are ONLY linked to inpatient visits
-        inpatient_visits = visit_occurrence.where(F.col("visit_concept_id").isin([9201, 262, 8971, 8920])).select(
-            "visit_occurrence_id", "visit_end_date", "cohort_member_id"
+        inpatient_visits = (
+            visit_occurrence
+            .where(F.col("visit_concept_id").isin([9201, 262, 8971, 8920]))
+            .select("visit_occurrence_id", "visit_end_date", "cohort_member_id")
         )
-        inpatient_events = patient_events.join(inpatient_visits, ["visit_occurrence_id", "cohort_member_id"])
+        inpatient_events = patient_events.join(
+            inpatient_visits, ["visit_occurrence_id", "cohort_member_id"]
+        )
 
         # Fill in the visit_end_date if null (because some visits are still ongoing at the time of data extraction)
         # Bound the event dates within visit_start_date and visit_end_date
