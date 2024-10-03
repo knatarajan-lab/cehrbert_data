@@ -177,7 +177,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
                 F.concat(F.lit(table_domain_field), F.lit("-"), F.col("domain_id")).alias("event_group_id"),
-                F.lit(-1).alias("concept_value"),
+                F.lit(0.0).alias("concept_value"),
                 unit_udf.alias("unit"),
             ).distinct()
 
@@ -1368,7 +1368,7 @@ def process_measurement(
     """
     # Get the standard units from the concept_name
     measurement = measurement.join(
-        concept.select("concept_id", "concept_name"), measurement.unit_concept_id == concept.concept_id, "left"
+        concept.select("concept_id", "concept_code"), measurement.unit_concept_id == concept.concept_id, "left"
     ).withColumn(
         "unit", F.coalesce(F.col("concept_code"), F.lit(None).cast("string"))
     ).drop("concept_id", "concept_name")
@@ -1411,7 +1411,7 @@ def process_measurement(
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
             CAST(NULL AS STRING) AS unit,
-            -1.0 AS concept_value,
+            0.0 AS concept_value,
             CONCAT('measurement-', CAST(m.measurement_id AS STRING)) AS event_group_id
         FROM measurement AS m
         WHERE EXISTS (
