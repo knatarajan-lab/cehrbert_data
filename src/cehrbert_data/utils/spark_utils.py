@@ -155,7 +155,6 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 datetime_field,
                 table_domain_field
         ) in get_key_fields(domain_table):
-            domain_id_field = get_domain_id_field(domain_table)
             # Remove records that don't have a date or standard_concept_id
             filtered_domain_table = domain_table.where(F.col(date_field).isNotNull()).where(
                 F.col(concept_id_field).isNotNull()
@@ -165,7 +164,6 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table.where(F.col(concept_id_field).cast("string") != "0")
                 .withColumn("date", F.to_date(F.col(date_field)))
                 .withColumn("datetime", datetime_field_udf)
-                .withColumn("domain_id", F.col(domain_id_field).cast("string"))
             )
 
             unit_udf = F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(None).cast("string")
@@ -176,7 +174,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["datetime"],
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
-                F.concat(F.lit(table_domain_field), F.lit("-"), F.col("domain_id")).alias("event_group_id"),
+                F.lit(None).cast("string").alias("event_group_id"),
                 F.lit(0.0).alias("concept_value"),
                 unit_udf.alias("unit"),
             ).distinct()
@@ -1349,6 +1347,16 @@ def create_visit_person_join(person, visit_occurrence, include_incomplete_visit=
     return visit_occurrence.join(person, "person_id")
 
 
+def clean_up_unit(dataframe: DataFrame) -> DataFrame:
+    return dataframe.withColumn(
+        "unit",
+        F.regexp_replace(F.col("unit"), r"\{.*?\}", "")
+    ).withColumn(
+        "unit",
+        F.regexp_replace(F.col("unit"), r"^/", "")
+    )
+
+
 def process_measurement(
         spark,
         measurement: DataFrame,
@@ -1369,9 +1377,8 @@ def process_measurement(
     # Get the standard units from the concept_name
     measurement = measurement.join(
         concept.select("concept_id", "concept_code"), measurement.unit_concept_id == concept.concept_id, "left"
-    ).withColumn(
-        "unit", F.coalesce(F.col("concept_code"), F.lit(None).cast("string"))
     ).drop("concept_id", "concept_name")
+    measurement = clean_up_unit(measurement)
 
     # Register the tables in spark context
     measurement.createOrReplaceTempView(MEASUREMENT)
@@ -1388,7 +1395,7 @@ def process_measurement(
             'measurement' AS domain,
             m.unit, 
             m.value_as_number AS concept_value,
-            CONCAT('measurement-', CAST(m.measurement_id AS STRING)) AS event_group_id
+            CAST(NULL AS STRING) AS event_group_id
         FROM measurement AS m
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
@@ -1412,7 +1419,7 @@ def process_measurement(
             'categorical_measurement' AS domain,
             CAST(NULL AS STRING) AS unit,
             0.0 AS concept_value,
-            CONCAT('measurement-', CAST(m.measurement_id AS STRING)) AS event_group_id
+            CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id
         FROM measurement AS m
         WHERE EXISTS (
             SELECT
