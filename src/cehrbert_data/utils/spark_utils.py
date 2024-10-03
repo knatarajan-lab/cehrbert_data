@@ -1353,7 +1353,7 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
         F.regexp_replace(F.col("unit"), r"\{.*?\}", "")
     ).withColumn(
         "unit",
-        F.regexp_replace(F.col("unit"), r"^/", "")
+        F.regexp_replace(F.col("unit"), r"^/", "1/")
     )
 
 

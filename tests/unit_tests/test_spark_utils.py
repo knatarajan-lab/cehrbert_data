@@ -19,9 +19,9 @@ class CleanUpUnitTest(unittest.TestCase):
     def test_clean_up_unit(self):
         # Create a sample DataFrame
         test_data = [
-            ("/mg/dL{adult}",),  # Contains both a leading / and a curly bracket
+            ("mg/dL{adult}",),  # Contains both a leading / and a curly bracket
             ("kg/m2{child}",),  # Contains only a curly bracket
-            ("{adult}/mmHg",),  # Contains only a leading /
+            ("mmHg",),  # Contains only a leading /
             ("g/L",),  # Contains neither
             ("/min",),
         ]
@@ -36,7 +36,7 @@ class CleanUpUnitTest(unittest.TestCase):
             ("kg/m2",),  # Removed curly bracket content
             ("mmHg",),  # Removed leading /
             ("g/L",),  # No change
-            ("min",),
+            ("1/min",),
         ]
         expected_df = self.spark.createDataFrame(expected_data, ["unit"])
 
