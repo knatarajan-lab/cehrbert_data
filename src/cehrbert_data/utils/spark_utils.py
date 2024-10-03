@@ -8,6 +8,7 @@ import pandas as pd
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import Window as W
+from pyspark.sql.functions import broadcast
 from pyspark.sql.pandas.functions import pandas_udf
 from pyspark.sql import DataFrame
 
@@ -30,6 +31,7 @@ from cehrbert_data.decorators import (
     ClinicalEventDecorator,
     time_token_func,
 )
+from cehrbert_data.queries import measurement_unit_stats_query
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
@@ -1375,14 +1377,24 @@ def process_measurement(
     :return:
     """
     # Get the standard units from the concept_name
-    measurement = measurement.join(
-        concept.select("concept_id", "concept_code"), measurement.unit_concept_id == concept.concept_id, "left"
-    ).drop("concept_id", "concept_name")
-    measurement = clean_up_unit(measurement)
+    measurement = clean_up_unit(
+        measurement.join(
+            concept.select("concept_id", "concept_code"),
+            measurement.unit_concept_id == concept.concept_id,
+            "left"
+        ).drop("concept_id", "concept_name")
+    )
 
     # Register the tables in spark context
     measurement.createOrReplaceTempView(MEASUREMENT)
     required_measurement.createOrReplaceTempView(REQUIRED_MEASUREMENT)
+    measurement_unit_stats_df = spark.sql(measurement_unit_stats_query)
+    # Cache the stats in memory
+    measurement_unit_stats_df.cache()
+    # Broadcast df to local executors
+    broadcast(measurement_unit_stats_df)
+    # Create the temp view for this dataframe
+    measurement_unit_stats_df.createOrReplaceTempView("measurement_unit_stats")
 
     numeric_lab = spark.sql(
         """
@@ -1397,8 +1409,12 @@ def process_measurement(
             m.value_as_number AS concept_value,
             CAST(NULL AS STRING) AS event_group_id
         FROM measurement AS m
+        JOIN measurement_unit_stats AS s
+            ON s.measurement_concept_id = m.measurement_concept_id
+                AND s.unit_concept_id = m.unit_concept_id
         WHERE m.visit_occurrence_id IS NOT NULL
             AND m.value_as_number IS NOT NULL
+            AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
     """
     )
 

@@ -38,5 +38,4 @@ WHERE
     AND m.unit_concept_id <> 0
     AND m.measurement_concept_id <> 0
 GROUP BY m.measurement_concept_id, m.unit_concept_id
-HAVING COUNT(*) >= 100
 """

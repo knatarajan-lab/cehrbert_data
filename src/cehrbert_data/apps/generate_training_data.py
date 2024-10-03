@@ -8,7 +8,15 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from cehrbert_data.const.common import DEATH, MEASUREMENT, PERSON, REQUIRED_MEASUREMENT, VISIT_OCCURRENCE, CONCEPT
+from cehrbert_data.const.common import (
+    PERSON,
+    VISIT_OCCURRENCE,
+    DEATH,
+    MEASUREMENT,
+    PROCESSED_MEASUREMENT,
+    REQUIRED_MEASUREMENT,
+    CONCEPT
+)
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
     create_sequence_data,
@@ -118,13 +126,18 @@ def main(
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
         measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
+        if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
+            raise ValueError(f"{REQUIRED_MEASUREMENT} needs to be provided when measurement is included!")
         required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
         if not os.path.exists(os.path.join(input_folder, CONCEPT)):
-            raise ValueError("concept needs to be provided when measurement is included!")
+            raise ValueError(f"{CONCEPT} needs to be provided when measurement is included!")
         concept = preprocess_domain_table(spark, input_folder, CONCEPT)
         # The select is necessary to make sure the order of the columns is the same as the
         # original dataframe, otherwise the union might use the wrong columns
-        filtered_measurement = process_measurement(spark, measurement, required_measurement, concept)
+        if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)):
+            filtered_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
+        else:
+            filtered_measurement = process_measurement(spark, measurement, required_measurement, concept)
 
         if patient_events:
             # Union all measurement records together with other domain records
