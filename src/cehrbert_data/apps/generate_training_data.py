@@ -46,6 +46,7 @@ def main(
         with_drug_rollup: bool = True,
         include_inpatient_hour_token: bool = False,
         continue_from_events: bool = False,
+        refresh_measurement: bool = False
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -68,6 +69,7 @@ def main(
         f"exclude_demographic: {exclude_demographic}\n"
         f"use_age_group: {use_age_group}\n"
         f"with_drug_rollup: {with_drug_rollup}\n"
+        f"refresh_measurement: {refresh_measurement}\n"
     )
 
     domain_tables = []
@@ -122,12 +124,16 @@ def main(
 
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
-        filtered_measurement = get_measurement_table(spark, input_folder)
+        processed_measurement = get_measurement_table(
+            spark,
+            input_folder,
+            refresh=refresh_measurement
+        )
         if patient_events:
             # Union all measurement records together with other domain records
-            patient_events = patient_events.unionByName(filtered_measurement)
+            patient_events = patient_events.unionByName(processed_measurement)
         else:
-            patient_events = filtered_measurement
+            patient_events = processed_measurement
 
     patient_events = (
         patient_events.join(visit_occurrence_person, "visit_occurrence_id")
@@ -308,7 +314,16 @@ if __name__ == "__main__":
         dest="include_inpatient_hour_token",
         action="store_true",
     )
-    parser.add_argument("--continue_from_events", dest="continue_from_events", action="store_true")
+    parser.add_argument(
+        "--continue_from_events",
+        dest="continue_from_events",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--refresh_measurement",
+        dest="refresh_measurement",
+        action="store_true"
+    )
     parser.add_argument(
         "--att_type",
         dest="att_type",
@@ -338,4 +353,5 @@ if __name__ == "__main__":
         with_drug_rollup=ARGS.with_drug_rollup,
         include_inpatient_hour_token=ARGS.include_inpatient_hour_token,
         continue_from_events=ARGS.continue_from_events,
+        refresh_measurement=ARGS.refresh_measurement,
     )

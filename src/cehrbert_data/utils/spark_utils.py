@@ -1353,13 +1353,16 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
 
 def get_measurement_table(
         spark: SparkSession,
-        input_folder: str
+        input_folder: str,
+        refresh: bool = False
 ) -> DataFrame:
     """
     A helper function to process and create the measurement table
 
     :param spark:
     :param input_folder:
+    :param refresh:
+
     :return:
     """
 
@@ -1378,7 +1381,7 @@ def get_measurement_table(
     concept = preprocess_domain_table(spark, input_folder, CONCEPT)
     # The select is necessary to make sure the order of the columns is the same as the
     # original dataframe, otherwise the union might use the wrong columns
-    if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)):
+    if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)) and not refresh:
         processed_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
     else:
         processed_measurement = process_measurement(
