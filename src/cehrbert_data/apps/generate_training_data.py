@@ -206,17 +206,21 @@ def main(
     patient_splits_folder = os.path.join(input_folder, "patient_splits")
     if os.path.exists(patient_splits_folder):
         patient_splits = spark.read.parquet(patient_splits_folder)
-        sequence_data.join(patient_splits, "person_id").write.mode("overwrite").parquet(
-            os.path.join(output_folder, "patient_sequence", "temp")
+        temp_folder = os.path.join(output_folder, "patient_sequence", "temp")
+        sequence_data.join(
+            patient_splits.select("person_id", "split"),
+            "person_id"
+        ).write.mode("overwrite").parquet(
+            temp_folder
         )
-        sequence_data = spark.read.parquet(os.path.join(output_folder, "patient_sequence", "temp"))
+        sequence_data = spark.read.parquet(temp_folder)
         sequence_data.where('split="train"').write.mode("overwrite").parquet(
             os.path.join(output_folder, "patient_sequence/train")
         )
         sequence_data.where('split="test"').write.mode("overwrite").parquet(
             os.path.join(output_folder, "patient_sequence/test")
         )
-        shutil.rmtree(os.path.join(output_folder, "patient_sequence", "temp"))
+        shutil.rmtree(temp_folder)
     else:
         sequence_data.write.mode("overwrite").parquet(os.path.join(output_folder, "patient_sequence"))
 
