@@ -324,6 +324,12 @@ def create_spark_args():
         help="Apply the filter to remove low-frequency concepts",
     )
     parser.add_argument(
+        "--refresh_measurement",
+        dest="refresh_measurement",
+        action="store_true",
+        help="Apply the filter to remove low-frequency concepts",
+    )
+    parser.add_argument(
         "--allow_measurement_only",
         dest="allow_measurement_only",
         action="store_true",

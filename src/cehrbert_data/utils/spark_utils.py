@@ -832,6 +832,7 @@ def extract_ehr_records(
         with_diagnosis_rollup=False,
         with_drug_rollup=True,
         include_concept_list=False,
+        refresh_measurement=False
 ):
     """
     Extract the ehr records for domain_table_list from input_folder.
@@ -843,6 +844,7 @@ def extract_ehr_records(
     :param with_diagnosis_rollup: whether ot not to roll up the diagnosis concepts to the parent levels
     :param with_drug_rollup: whether ot not to roll up the drug concepts to the parent levels
     :param include_concept_list:
+    :param refresh_measurement:
     :return:
     """
     domain_tables = []
@@ -870,7 +872,9 @@ def extract_ehr_records(
     # Process the measurement table if exists
     if MEASUREMENT in domain_table_list:
         processed_measurement = get_measurement_table(
-            spark, input_folder
+            spark,
+            input_folder,
+            refresh=refresh_measurement
         )
         if patient_ehr_records:
             # Union all measurement records together with other domain records
