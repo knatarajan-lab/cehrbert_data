@@ -1370,7 +1370,7 @@ def process_measurement(
     measurement = measurement.join(
         concept.select("concept_id", "concept_name"), measurement.unit_concept_id == concept.concept_id, "left"
     ).withColumn(
-        "unit", F.coalesce(F.col("concept_name"), F.lit(None).cast("string"))
+        "unit", F.coalesce(F.col("concept_code"), F.lit(None).cast("string"))
     ).drop("concept_id", "concept_name")
 
     # Register the tables in spark context
