@@ -3,6 +3,7 @@ SELECT
     m.measurement_concept_id,
     c.concept_name,
     COUNT(*) AS freq,
+    COUNT(DISTINCT person_id) AS person_count,
     SUM(CASE WHEN m.value_as_number IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*) AS numeric_percentage,
     SUM(CASE WHEN m.value_as_concept_id IS NOT NULL AND m.value_as_concept_id <> 0 THEN 1 ELSE 0 END) / COUNT(*) AS categorical_percentage
 FROM measurement AS m

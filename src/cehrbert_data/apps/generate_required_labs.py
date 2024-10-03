@@ -18,7 +18,13 @@ from cehrbert_data.queries.measurement_queries import (
 )
 
 
-def main(input_folder, output_folder, num_of_numeric_labs, num_of_categorical_labs):
+def main(
+        input_folder,
+        output_folder,
+        num_of_numeric_labs,
+        num_of_categorical_labs,
+        min_num_of_patients
+):
     spark = SparkSession.builder.appName("Generate required labs").getOrCreate()
 
     # Load measurement as a dataframe in pyspark
@@ -31,7 +37,7 @@ def main(input_folder, output_folder, num_of_numeric_labs, num_of_categorical_la
     concept.createOrReplaceTempView(CONCEPT)
     # Create the
     required_lab_dataframe = generate_required_labs(
-        spark, num_of_numeric_labs, num_of_categorical_labs
+        spark, num_of_numeric_labs, num_of_categorical_labs, min_num_of_patients
     )
     required_lab_dataframe.write.mode("overwrite").parquet(
         os.path.join(output_folder, REQUIRED_MEASUREMENT)
@@ -47,13 +53,15 @@ def main(input_folder, output_folder, num_of_numeric_labs, num_of_categorical_la
     )
 
 
-
 def generate_required_labs(
         spark: SparkSession,
         num_of_numeric_labs: int,
-        num_of_categorical_labs: int
+        num_of_categorical_labs: int,
+        min_num_of_patients: int
 ) -> DataFrame:
+
     prevalent_labs = spark.sql(LAB_PREVALENCE_QUERY)
+    prevalent_labs = prevalent_labs.where(F.col("person_count") >= min_num_of_patients)
     # Cache the dataframe for faster computation in the below transformations
     prevalent_labs.cache()
     prevalent_numeric_labs = (
@@ -99,7 +107,7 @@ if __name__ == "__main__":
         action="store",
         type=int,
         default=100,
-        help="The top most popular numeric labs to be included",
+        help="The top most prevalent numeric labs to be included",
         required=False,
     )
     parser.add_argument(
@@ -108,7 +116,16 @@ if __name__ == "__main__":
         action="store",
         type=int,
         default=100,
-        help="The top most popular categorical labs to be included",
+        help="The top most prevalent categorical labs to be included",
+        required=False,
+    )
+    parser.add_argument(
+        "--min_num_of_patients",
+        dest="min_num_of_patients",
+        action="store",
+        type=int,
+        default=0,
+        help="Min no.of patients linked to concepts to be included",
         required=False,
     )
 
@@ -119,4 +136,5 @@ if __name__ == "__main__":
         ARGS.output_folder,
         ARGS.num_of_numeric_labs,
         ARGS.num_of_categorical_labs,
+        ARGS.min_num_of_patients
     )
