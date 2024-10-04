@@ -24,6 +24,7 @@ from cehrbert_data.const.common import (
     UNKNOWN_CONCEPT,
     VISIT_OCCURRENCE,
     CONCEPT,
+    NA,
 )
 from cehrbert_data.decorators import (
     AttType,
@@ -169,7 +170,6 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 .withColumn("datetime", datetime_field_udf)
             )
 
-            unit_udf = F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(None).cast("string")
             filtered_domain_table = filtered_domain_table.select(
                 filtered_domain_table["person_id"],
                 filtered_domain_table[concept_id_field].alias("standard_concept_id"),
@@ -179,7 +179,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 F.lit(table_domain_field).alias("domain"),
                 F.lit(None).cast("string").alias("event_group_id"),
                 F.lit(0.0).alias("concept_value"),
-                unit_udf.alias("unit"),
+                F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence
@@ -1457,7 +1457,7 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
-            CAST(NULL AS STRING) AS unit,
+            'N/A' AS unit,
             0.0 AS concept_value,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id
         FROM measurement AS m
