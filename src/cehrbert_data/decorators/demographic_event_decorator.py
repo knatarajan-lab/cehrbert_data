@@ -40,7 +40,7 @@ class DemographicEventDecorator(PatientEventDecorator):
             patient_events.withColumn("token_order", first_token_udf)
             .withColumn("concept_value_mask", F.lit(0))
             .withColumn("concept_value", F.lit(0.0))
-            .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
             .where("token_order = 1")
             .drop("token_order")

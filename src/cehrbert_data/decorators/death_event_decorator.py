@@ -68,7 +68,7 @@ class DeathEventDecorator(PatientEventDecorator):
             death_records
             .withColumn("standard_concept_id", F.lit(VS_TOKEN))
             .withColumn("priority", VS_TOKEN_PRIORITY)
-            .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
         )
 
@@ -76,7 +76,7 @@ class DeathEventDecorator(PatientEventDecorator):
             death_records
             .withColumn("standard_concept_id", F.lit(VE_TOKEN))
             .withColumn("priority", VE_TOKEN_PRIORITY)
-            .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
         )
 
@@ -102,7 +102,7 @@ class DeathEventDecorator(PatientEventDecorator):
             death_events.withColumn("time_delta", F.datediff("death_date", "date"))
             .withColumn("standard_concept_id", time_token_udf("time_delta"))
             .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
-            .withColumn("unit", F.lit(None).cast("string"))
+            .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
             .drop("time_delta")
         )
