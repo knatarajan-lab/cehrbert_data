@@ -1452,11 +1452,7 @@ def process_measurement(
         """
         SELECT
             m.person_id,
-            CASE
-                WHEN value_as_concept_id IS NOT NULL AND value_as_concept_id <> 0
-                THEN CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(COALESCE(value_as_concept_id, 0) AS STRING))
-                ELSE CAST(measurement_concept_id AS STRING)
-            END AS standard_concept_id,
+            CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(COALESCE(value_as_concept_id, 0) AS STRING)) AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
