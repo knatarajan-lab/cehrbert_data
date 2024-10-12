@@ -22,6 +22,7 @@ from cehrbert_data.utils.spark_utils import (
     get_descendant_concept_ids,
     preprocess_domain_table,
 )
+from cehrbert_data.utils.logging_utils import add_console_logging
 
 from ..cohorts.query_builder import ENTRY_COHORT, NEGATIVE_COHORT, QueryBuilder
 
@@ -677,6 +678,10 @@ def create_prediction_cohort(
     :param ehr_table_list:
     :return:
     """
+    # Add logging to spark application output when enable_logging is set to True
+    if spark_args.enable_logging:
+        add_console_logging()
+
     # Toggle the prior/post observation_period depending on the is_window_post_index flag
     prior_observation_period = (
         0 if spark_args.is_window_post_index else spark_args.observation_window + spark_args.hold_off_window
