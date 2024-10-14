@@ -23,6 +23,7 @@ from cehrbert_data.utils.spark_utils import (
     get_measurement_table,
     validate_table_names,
 )
+from cehrbert_data.utils.logging_utils import add_console_logging
 
 
 def main(
@@ -332,6 +333,9 @@ if __name__ == "__main__":
     )
 
     ARGS = parser.parse_args()
+
+    # Enable logging
+    add_console_logging()
 
     main(
         ARGS.input_folder,

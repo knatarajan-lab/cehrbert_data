@@ -83,6 +83,12 @@ def create_spark_args():
     """
     parser = argparse.ArgumentParser(description="Arguments for spark applications for generating cohort definitions")
     parser.add_argument(
+        "--enable_logging",
+        dest="enable_logging",
+        action="store_true",
+        help="Indicate whether we should log the info to the spark-submit output",
+    )
+    parser.add_argument(
         "-c",
         "--cohort_name",
         dest="cohort_name",
