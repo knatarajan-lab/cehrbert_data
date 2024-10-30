@@ -138,58 +138,77 @@ def create_omop_person(
     )
 
 
-def extract_value(data: DataFrame, concept: DataFrame):
-    numeric_pattern = "^[+-]?\\d*\\.?\\d+$"
-    # Add a new column 'is_numeric' to check if 'value' is numeric
-    df = data.withColumn("is_numeric", f.regexp_extract(f.col("value"), numeric_pattern, 0) != "")
-
-    numeric_df = df.where(
-        f.col("is_numeric")
-    ).withColumn(
-        "value_as_number",
-        f.col("value").cast(t.FloatType())
-    )
+def map_unit(data: DataFrame, concept: DataFrame) -> DataFrame:
     # Find the unit mapping from the concept table
-    unit_df = numeric_df.select("unit").distinct().join(
-        concept.where(f.col("domain_id") == "Unit"), numeric_df["unit"] == concept["concept_code"],
+    unit_df = data.select("unit").distinct().join(
+        concept.where(f.col("domain_id") == "Unit"), data["unit"] == concept["concept_code"],
         "left_outer"
     ).select(
-        numeric_df["unit"],
+        data["unit"],
         f.coalesce(concept["concept_id"], f.lit(0)).alias("unit_concept_id")
     )
-    unit_df = unit_df.withColumn(
+    return unit_df.withColumn(
         "order",
         f.row_number().over(Window.partitionBy(f.col("unit")).orderBy(f.col("unit_concept_id")))
     ).where(
         f.col("order") == 1
-    ).drop("order")
-
-    numeric_df = numeric_df.join(
+    ).drop("order").join(
         unit_df, "unit"
-    ).withColumn(
-        "value_as_concept", f.lit(None).cast(t.IntegerType())
     )
 
-    categorical_df = df.where(
-        ~f.col("is_numeric")
-    )
-    answer_df = categorical_df.select("value").distinct().join(
+
+def map_answer(
+        data: DataFrame,
+        concept: DataFrame
+) -> DataFrame:
+    answer_df = data.select("value").distinct().join(
         concept.where(f.col("domain_id") == "Meas Value"),
-        categorical_df["value"] == concept["concept_name"]
+        data["value"] == concept["concept_name"]
     ).select(
-        categorical_df["value"],
+        data["value"],
         f.coalesce(concept["concept_id"], f.lit(0)).alias("value_as_concept_id")
-    ).withColumn(
+    )
+
+    return answer_df.withColumn(
         "order",
         f.row_number().over(Window.partitionBy(f.col("value")).orderBy(f.col("value_as_concept_id")))
     ).where(
         f.col("order") == 1
-    ).drop("order")
-
-    categorical_df = categorical_df.join(
+    ).drop("order").join(
         answer_df, "value"
-    ).withColumn(
-        "unit_concept_id", f.lit(None).cast(t.IntegerType())
+    )
+
+
+def extract_value(
+        data: DataFrame,
+        concept: DataFrame
+):
+    numeric_pattern = "^[+-]?\\d*\\.?\\d+$"
+    # Add a new column 'is_numeric' to check if 'value' is numeric
+    df = data.withColumn(
+        "is_eric",
+        f.regexp_extract(f.col("value"), numeric_pattern, 0) != ""
+    )
+
+    numeric_df = map_unit(
+        df.where(
+            f.col("is_numeric")
+        ).withColumn(
+            "value_as_number",
+            f.col("value").cast(t.FloatType())
+        ).withColumn(
+            "value_as_concept", f.lit(None).cast(t.IntegerType())
+        ),
+        concept
+    )
+
+    categorical_df = map_answer(
+        df.where(
+            ~f.col("is_numeric")
+        ).withColumn(
+            "unit_concept_id", f.lit(None).cast(t.IntegerType())
+        ),
+        concept
     )
 
     other_df = df.where(f.col("is_numeric").isNull()).withColumn(
@@ -205,7 +224,12 @@ def extract_value(data: DataFrame, concept: DataFrame):
     )
 
 
-def convert_code_to_omop_concept(data: DataFrame, concept: DataFrame, field: str) -> DataFrame:
+def convert_code_to_omop_concept(
+        data: DataFrame,
+        concept: DataFrame,
+        field: str
+) -> DataFrame:
+
     data = data.withColumn(
         "vocabulary_id",
         f.split(field, "/")[0]
