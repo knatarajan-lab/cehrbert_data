@@ -74,7 +74,7 @@ def main(args):
     ehr_records = extract_ehr_records(
         spark,
         input_folder=args.input_folder,
-        domain_table_list=args.domain_table_list,
+        domain_table_list=args.ehr_table_list,
         include_visit_type=args.include_visit_type,
         with_diagnosis_rollup=args.is_roll_up_concept,
         with_drug_rollup=args.is_drug_roll_up_concept,
