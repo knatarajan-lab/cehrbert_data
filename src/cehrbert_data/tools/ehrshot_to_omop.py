@@ -426,11 +426,13 @@ def main(args):
         domain_table = ehr_shot_data.where(f.col("omop_table") == domain_table_name)
         original_columns = domain_table.schema.fieldNames()
         for column, omop_column in mappings.items():
-            domain_table = domain_table.withColumn(omop_column, f.col(column))
             if omop_column.endswith("datetime"):
+                domain_table = domain_table.withColumn(omop_column, f.col(column).cast(t.TimestampType()))
                 domain_table = domain_table.withColumn(
-                    omop_column[:-4], f.col(omop_column).cast(t.DataType())
+                    omop_column[:-4], f.col(omop_column).cast(t.DateType())
                 )
+            else:
+                domain_table = domain_table.withColumn(omop_column, f.col(column))
         if "value" in mappings:
             domain_table = extract_value(domain_table, concept)
         domain_table.drop(*original_columns)
