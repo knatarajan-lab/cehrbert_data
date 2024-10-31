@@ -184,6 +184,30 @@ def map_unit(
         data: DataFrame,
         concept: DataFrame
 ) -> DataFrame:
+    """
+    Maps unit values in a DataFrame to OMOP unit concept IDs.
+
+    This function processes distinct `unit` entries in the `data` DataFrame, joining them with
+    the `concept` DataFrame to find corresponding OMOP concept IDs where `domain_id` is `"Unit"`.
+    It adds a `unit_concept_id` column with the mapped concept ID or assigns a default of `0` when
+    no match is found. Only the first matched concept ID is retained for each unique unit value.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Source DataFrame containing a `unit` column with units to be mapped to OMOP concept IDs.
+
+    concept : DataFrame
+        DataFrame containing OMOP concepts with columns `domain_id`, `concept_code`, and `concept_id`,
+        used for mapping units in `data` to OMOP unit concept IDs.
+
+    Returns
+    -------
+    DataFrame
+        The input `data` DataFrame with an additional `unit_concept_id` column representing the
+        mapped OMOP concept ID for each `unit`. If no matching concept is found, `unit_concept_id`
+        is set to `0`.
+    """
     # Find the unit mapping from the concept table
     unit_df = data.select("unit").distinct().join(
         concept.where(f.col("domain_id") == "Unit"),
@@ -204,6 +228,31 @@ def map_answer(
         data: DataFrame,
         concept: DataFrame
 ) -> DataFrame:
+    """
+    Maps categorical answer values in a DataFrame to OMOP concept IDs.
+
+    This function processes distinct `value` entries in the `data` DataFrame, joining them with
+    the `concept` DataFrame to find OMOP concept IDs where `domain_id` is `"Meas Value"`. It
+    adds a `value_as_concept_id` column with the mapped concept ID or assigns a default of `0`
+    when no match is found. Only the first matched concept ID is retained for each unique value.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Source DataFrame containing the `value` column, which holds categorical answer values
+        that will be mapped to OMOP concept IDs.
+
+    concept : DataFrame
+        DataFrame containing OMOP concepts, including columns `domain_id`, `concept_name`,
+        and `concept_id`, used for matching answer values to OMOP concept IDs.
+
+    Returns
+    -------
+    DataFrame
+        The input `data` DataFrame with an additional `value_as_concept_id` column, representing
+        the mapped OMOP concept ID for each `value`. If no matching concept is found, `value_as_concept_id`
+        is set to `0`.
+    """
     answer_df = data.select("value").distinct().join(
         concept.where(f.col("domain_id") == "Meas Value"),
         data["value"] == concept["concept_name"],
@@ -226,6 +275,35 @@ def extract_value(
         data: DataFrame,
         concept: DataFrame
 ):
+    """
+    Transforms and maps values in a DataFrame to OMOP-compatible numeric, categorical, or unclassified representations.
+
+    This function processes the `value` column in the `data` DataFrame to categorize each entry as numeric,
+    categorical, or unmatched. Numeric values are cast to floats and joined with OMOP units in `concept`.
+    Categorical values are matched to OMOP measurement values in `concept`, while unmatched values are returned
+    as null mappings. The output includes mapped `unit_concept_id` and `value_as_concept_id` columns, as well as
+    renamed source columns for OMOP compatibility.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Source DataFrame containing the columns `value` (mixed numeric or categorical entries) and `unit`
+        (for numeric values). Both columns are used for mapping to OMOP concepts.
+
+    concept : DataFrame
+        DataFrame containing OMOP concepts, used to map numeric units and categorical values with columns
+        `domain_id`, `concept_name`, `concept_code`, and `concept_id`.
+
+    Returns
+    -------
+    DataFrame
+        A DataFrame where:
+        - `value_source_value`: Original `value` column renamed for OMOP compatibility.
+        - `unit_source_value`: Original `unit` column renamed for OMOP compatibility.
+        - `value_as_number`: Contains numeric values where applicable, otherwise null.
+        - `value_as_concept_id`: Concept ID for categorical values, null for numeric.
+        - `unit_concept_id`: Concept ID for units associated with numeric values, null for categorical values.
+    """
     numeric_pattern = "^[+-]?\\d*\\.?\\d+$"
     # Add a new column 'is_numeric' to check if 'value' is numeric
     df = data.withColumn(
@@ -276,6 +354,40 @@ def convert_code_to_omop_concept(
         concept: DataFrame,
         field: str
 ) -> DataFrame:
+    """
+    Maps source-specific codes in a DataFrame to OMOP concept IDs based on vocabulary and concept codes.
+
+    This function extracts `vocabulary_id` and `concept_code` from the specified `field` column in the
+    `data` DataFrame by splitting it at the "/" character. It then performs a left join with the `concept`
+    DataFrame on both `vocabulary_id` and `concept_code` to retrieve the corresponding OMOP `concept_id`.
+    If a match is not found, `concept_id` defaults to 0.
+
+    Parameters
+    ----------
+    data : DataFrame
+        The source DataFrame containing at least the specified `field` column to be mapped, which includes
+        vocabulary and concept codes separated by "/".
+
+    concept : DataFrame
+        A DataFrame containing `vocabulary_id`, `concept_code`, and `concept_id` columns that provide
+        mappings to OMOP concept IDs.
+
+    field : str
+        The name of the column in `data` that contains the vocabulary and concept codes to be split
+        and mapped.
+
+    Returns
+    -------
+    DataFrame
+        A DataFrame with all columns from `data`, along with an added `concept_id` column mapped from `concept`.
+        If no mapping is found in the `concept` DataFrame, `concept_id` is set to 0.
+
+    Example
+    -------
+    Assuming `data` contains a column `code` with values such as "ICD10/1234" and `concept` contains rows
+    mapping `ICD10` vocabulary and `1234` code to a specific OMOP concept ID, this function will add
+    `concept_id` to `data` where values are mapped as per the `concept` DataFrame.
+    """
     data = data.withColumn(
         "vocabulary_id",
         f.split(field, "/")[0]
@@ -294,6 +406,7 @@ def convert_code_to_omop_concept(
 
 
 def main(args):
+
     spark = SparkSession.builder.appName("Convert EHRShot Data").getOrCreate()
 
     logger.info(
@@ -314,6 +427,10 @@ def main(args):
         original_columns = domain_table.schema.fieldNames()
         for column, omop_column in mappings.items():
             domain_table = domain_table.withColumn(omop_column, f.col(column))
+            if omop_column.endswith("datetime"):
+                domain_table = domain_table.withColumn(
+                    omop_column[:-4], f.col(omop_column).cast(t.DataType())
+                )
         if "value" in mappings:
             domain_table = extract_value(domain_table, concept)
         domain_table.drop(*original_columns)
