@@ -550,6 +550,8 @@ def main(args):
     ehr_shot_data = generate_visit_id(
         ehr_shot_data
     )
+    ehr_shot_data.write.mode("overwrite").parquet(os.path.join(args.output_folder, "ehr_shot"))
+    ehr_shot_data = spark.read.parquet(os.path.join(args.output_folder, "ehr_shot"))
     concept = spark.read.parquet(os.path.join(args.vocabulary_folder, "concept"))
 
     person = create_omop_person(ehr_shot_data, concept)
