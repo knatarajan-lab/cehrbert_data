@@ -475,16 +475,21 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
     )
 
     visit = data.select("patient_id", "visit_order").distinct().withColumn(
-        "visit_id",
+        "new_visit_id",
         f.abs(
             f.hash(f.concat(f.col("patient_id").cast("string"), f.col("visit_order").cast("string")))
         ).cast("bigint")
     )
 
     # Validate the uniqueness of visit_id
-    visit.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1))
+    visit.groupby("new_visit_id").count().select(f.assert_true(f.col("count") == 1))
     # Join the generated visit_id back to data
-    return data.join(visit, on=["patient_id", "visit_order"]).drop("visit_order", "patient_event_order")
+    return data.join(
+        visit,
+        on=["patient_id", "visit_order"]
+    ).withColumn(
+        "visit_id", f.coalesce(f.col("new_visit_id"), f.col("visit_id"))
+    ).drop("visit_order", "patient_event_order", "new_visit_id")
 
 
 def drop_duplicate_visits(data: DataFrame) -> DataFrame:

@@ -53,17 +53,18 @@ class EHRShotUnitTest(unittest.TestCase):
         schema = StructType([
             StructField("patient_id", IntegerType(), True),
             StructField("start", TimestampType(), True),
-            StructField("end", TimestampType(), True)
+            StructField("end", TimestampType(), True),
+            StructField("visit_id", IntegerType(), True)
         ])
 
         # Sample data with multiple events for each patient and different time gaps
         data = [
-            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9)),
-            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20)),  # 11-hour gap (merged visit)
-            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20)),  # another visit
-            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9)),
-            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11)),  # same visit for patient 2
-            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9))
+            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None),
+            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20), None),  # 11-hour gap (merged visit)
+            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), None),  # another visit
+            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None),
+            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None),  # same visit for patient 2
+            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1000)
         ]
 
         # Create DataFrame
