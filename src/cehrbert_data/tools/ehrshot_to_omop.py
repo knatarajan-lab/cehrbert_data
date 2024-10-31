@@ -519,7 +519,7 @@ def main(args):
             else:
                 domain_table = domain_table.withColumn(omop_column, f.col(column))
 
-        if "value" in mappings:
+        if domain_table_name in ["measurement", "observation"]:
             domain_table = extract_value(domain_table, concept)
 
         domain_table = convert_code_to_omop_concept(
