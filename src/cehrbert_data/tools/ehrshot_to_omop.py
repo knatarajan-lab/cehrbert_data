@@ -572,12 +572,6 @@ def main(args):
             else:
                 domain_table = domain_table.withColumn(omop_column, f.col(column))
 
-        # Adding the domain table id
-        domain_table = domain_table.withColumn(
-            domain_table_name + "_id",
-            f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
-        )
-
         if domain_table_name in ["measurement", "observation"]:
             domain_table = extract_value(domain_table, concept)
 
@@ -594,6 +588,12 @@ def main(args):
                     f.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
                     f.lit(0).cast(t.IntegerType())
                 ).otherwise(f.lit(None).cast(t.IntegerType()))
+            ).withColumnRenamed("visit_id", "visit_occurrence_id")
+        else:
+            # Adding the domain table id
+            domain_table = domain_table.withColumn(
+                domain_table_name + "_id",
+                f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
             )
 
         domain_table.drop(
