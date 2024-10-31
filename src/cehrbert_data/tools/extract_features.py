@@ -10,7 +10,9 @@ from pyspark.sql.window import Window
 
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_parse_args import create_spark_args
-from cehrbert_data.utils.spark_utils import extract_ehr_records, create_sequence_data_with_att
+from cehrbert_data.utils.spark_utils import (
+    extract_ehr_records, create_sequence_data_with_att, create_concept_frequency_data
+)
 
 
 class PredictionType(Enum):
@@ -110,18 +112,28 @@ def main(args):
         .drop("birth_datetime")
     )
 
-    ehr_records = create_sequence_data_with_att(
-        ehr_records,
-        visit_occurrence=visit_occurrence_person,
-        include_visit_type=args.include_visit_type,
-        exclude_visit_tokens=args.exclude_visit_tokens,
-        patient_demographic=(
-            patient_demographic if args.gpt_patient_sequence else None
-        ),
-        att_type=AttType.DAY,
-        exclude_demographic=args.exclude_demographic,
-        use_age_group=args.use_age_group
-    )
+    if args.is_new_patient_representation:
+        ehr_records = create_sequence_data_with_att(
+            ehr_records,
+            visit_occurrence=visit_occurrence_person,
+            include_visit_type=args.include_visit_type,
+            exclude_visit_tokens=args.exclude_visit_tokens,
+            patient_demographic=(
+                patient_demographic if args.gpt_patient_sequence else None
+            ),
+            att_type=AttType.DAY,
+            exclude_demographic=args.exclude_demographic,
+            use_age_group=args.use_age_group
+        )
+    elif args.is_feature_concept_frequency:
+        ehr_records = create_concept_frequency_data(
+            ehr_records
+        )
+    else:
+        raise RuntimeError(
+            "Can not extract features, use --is_new_patient_representation or --is_feature_concept_frequency"
+        )
+
     cohort = cohort.join(
         person.select("person_id", "year_of_birth"),
         "person_id"
