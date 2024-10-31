@@ -61,7 +61,8 @@ def main(args):
         csv(args.cohort_dir). \
         withColumnRenamed(args.person_id_column, "person_id"). \
         withColumnRenamed(args.index_date_column, "index_date"). \
-        withColumnRenamed(args.label_column, "label")
+        withColumnRenamed(args.label_column, "label"). \
+        withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
 
     if PredictionType.REGRESSION:
         cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
