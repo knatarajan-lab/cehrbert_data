@@ -60,7 +60,7 @@ def main(args):
         option("inferSchema", "true"). \
         csv(args.cohort_dir). \
         withColumnRenamed(args.person_id_column, "person_id"). \
-        withColumnRenamed(args.person_id_column, "index_date"). \
+        withColumnRenamed(args.index_date_column, "index_date"). \
         withColumnRenamed(args.label_column, "label")
 
     if PredictionType.REGRESSION:
