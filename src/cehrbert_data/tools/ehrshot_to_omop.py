@@ -545,16 +545,18 @@ def main(args):
         f"ehr_shot_file: {args.ehr_shot_file}\n"
         f"output_folder: {args.output_folder}\n"
     )
+    ehr_shot_path = os.path.join(args.output_folder, "ehr_shot")
+    if args.refresh_ehrshot or not os.path.exists(ehr_shot_path):
+        ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
+            args.ehr_shot_file
+        )
+        # Add visit_id based on the time intervals between neighboring events
+        ehr_shot_data = generate_visit_id(
+            ehr_shot_data
+        )
+        ehr_shot_data.write.mode("overwrite").parquet(ehr_shot_path)
 
-    ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
-        args.ehr_shot_file
-    )
-    # Add visit_id based on the time intervals between neighboring events
-    ehr_shot_data = generate_visit_id(
-        ehr_shot_data
-    )
-    ehr_shot_data.write.mode("overwrite").parquet(os.path.join(args.output_folder, "ehr_shot"))
-    ehr_shot_data = spark.read.parquet(os.path.join(args.output_folder, "ehr_shot"))
+    ehr_shot_data = spark.read.parquet(ehr_shot_path)
     concept = spark.read.parquet(os.path.join(args.vocabulary_folder, "concept"))
 
     person = create_omop_person(ehr_shot_data, concept)
@@ -629,6 +631,11 @@ if __name__ == "__main__":
         dest="output_folder",
         action="store",
         required=True,
+    )
+    parser.add_argument(
+        "--refresh_ehrshot",
+        dest="refresh_ehrshot",
+        action="store_true",
     )
     main(
         parser.parse_args()
