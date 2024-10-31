@@ -2,7 +2,9 @@ import unittest
 from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
-from cehrbert_data.tools.ehrshot_to_omop import map_unit, map_answer, create_omop_person
+from cehrbert_data.tools.ehrshot_to_omop import (
+    map_unit, map_answer, create_omop_person, convert_code_to_omop_concept
+)
 
 
 # Define the test case
@@ -38,6 +40,61 @@ class EHRShotUnitTest(unittest.TestCase):
             StructField("code", StringType(), True),
             StructField("start", TimestampType(), True)
         ])
+
+    def test_convert_code_to_omop_concept(self):
+        # Define schemas for input DataFrames
+        data_schema = StructType([
+            StructField("patient_id", IntegerType(), True),
+            StructField("code", StringType(), True)
+        ])
+
+        concept_schema = StructType([
+            StructField("vocabulary_id", StringType(), True),
+            StructField("concept_code", StringType(), True),
+            StructField("concept_id", IntegerType(), True)
+        ])
+
+        # Sample data for testing
+        data = [
+            (1, "ICD10/1234"),
+            (2, "SNOMED/5678"),
+            (3, "ICD10/0000")  # No matching concept
+        ]
+
+        concept_data = [
+            ("ICD10", "1234", 1001),
+            ("SNOMED", "5678", 1002)
+        ]
+
+        # Create DataFrames
+        data = self.spark.createDataFrame(data, schema=data_schema)
+        concept = self.spark.createDataFrame(concept_data, schema=concept_schema)
+        # Run function
+        actual_df = convert_code_to_omop_concept(data, concept, "code")
+
+        # Define expected data and schema
+        expected_data = [
+            (1, "ICD10/1234", "ICD10", "1234", 1001),  # Match with concept_id 1001
+            (2, "SNOMED/5678", "SNOMED", "5678", 1002),  # Match with concept_id 1002
+            (3, "ICD10/0000", "ICD10", "0000", 0)  # No match, default concept_id 0
+        ]
+
+        expected_schema = StructType([
+            StructField("patient_id", IntegerType(), True),
+            StructField("code", StringType(), True),
+            StructField("vocabulary_id", StringType(), True),
+            StructField("concept_code", StringType(), True),
+            StructField("concept_id", IntegerType(), True)
+        ])
+
+        expected_df = self.spark.createDataFrame(expected_data, schema=expected_schema)
+
+        # Collect results for comparison
+        actual_data = actual_df.sort("patient_id").collect()
+        expected_data = expected_df.sort("patient_id").collect()
+
+        # Compare results
+        self.assertEqual(actual_data, expected_data)
 
     def test_create_omop_person(self):
         # Sample concept data for mapping demographic codes to concept_ids
