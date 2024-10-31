@@ -445,10 +445,9 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
         The input DataFrame with an additional `visit_id` column, which is a unique integer identifier
         for each visit, and each `patient_id`'s events are grouped according to visit.
     """
-    data = data.repartition(16)
     order_window = Window.partitionBy("patient_id").orderBy(f.col("start"))
 
-    data = data.withColumn(
+    data = data.repartition(16).withColumn(
         "patient_event_order", f.row_number().over(order_window)
     ).withColumn(
         "time", f.coalesce(f.col("end"), f.col("start"))
@@ -475,12 +474,14 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
     )
 
     # We only allow the generated visit_ids associated with the visit_occurrence table
-    visit = data.select("patient_id", "visit_order", "omop_table").distinct().withColumn(
+    visit = data.where(
+        f.col("omop_table") == "visit_occurrence"
+    ).select("patient_id", "visit_order").distinct().withColumn(
         "new_visit_id",
         f.abs(
             f.hash(f.concat(f.col("patient_id").cast("string"), f.col("visit_order").cast("string")))
         ).cast("bigint")
-    ).where(f.col("omop_table") == "visit_occurrence")
+    )
 
     # Validate the uniqueness of visit_id
     visit.groupby("new_visit_id").count().select(f.assert_true(f.col("count") == 1))
@@ -586,7 +587,14 @@ def main(args):
 
         # There could be multiple visit
         if domain_table_name == "visit_occurrence":
-            domain_table = drop_duplicate_visits(domain_table)
+            # The ehrshot dataset did not document where the patients got discharged to, so let's set everything to 0
+            domain_table = drop_duplicate_visits(domain_table).withColumn(
+                "discharged_to_concept_id",
+                f.when(
+                    f.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
+                    f.lit(0).cast(t.IntegerType())
+                ).otherwise(f.lit(None).cast(t.IntegerType()))
+            )
 
         domain_table.drop(
             *original_columns
