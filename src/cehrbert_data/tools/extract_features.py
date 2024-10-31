@@ -82,10 +82,11 @@ def main(args):
         refresh_measurement=args.refresh_measurement,
     )
 
-    cohort_ehr_records = cohort.select("person_id", "cohort_member_id", "index_date", "label").join(
+    # Drop index_date because create_sequence_data_with_att does not expect this column
+    ehr_records = cohort.select("person_id", "cohort_member_id", "index_date").join(
         ehr_records,
         "person_id"
-    ).where(ehr_records["date"] <= cohort["index_date"])
+    ).where(ehr_records["date"] <= cohort["index_date"]).drop("index_date")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -106,8 +107,9 @@ def main(args):
         .withColumn("age", age_udf)
         .drop("birth_datetime")
     )
-    cohort = create_sequence_data_with_att(
-        cohort_ehr_records,
+
+    ehr_records = create_sequence_data_with_att(
+        ehr_records,
         visit_occurrence=visit_occurrence_person,
         include_visit_type=args.include_visit_type,
         exclude_visit_tokens=args.exclude_visit_tokens,
@@ -118,6 +120,12 @@ def main(args):
         exclude_demographic=args.exclude_demographic,
         use_age_group=args.use_age_group
     )
+
+    cohort = ehr_records.join(
+        cohort,
+        (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
+    )
+
     if args.patient_splits_folder:
         patient_splits = spark.read.parquet(args.patient_splits_folder)
         cohort.join(patient_splits, "person_id").write.mode(
