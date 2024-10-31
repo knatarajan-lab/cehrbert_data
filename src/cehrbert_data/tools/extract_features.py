@@ -8,6 +8,7 @@ from pyspark.sql import types as t
 from pyspark.sql import functions as f
 from pyspark.sql.window import Window
 
+from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_parse_args import create_spark_args
 from cehrbert_data.utils.spark_utils import extract_ehr_records, create_sequence_data_with_att
 
@@ -117,7 +118,7 @@ def main(args):
         patient_demographic=(
             patient_demographic if args.gpt_patient_sequence else None
         ),
-        att_type=args.att_type,
+        att_type=AttType.DAY,
         exclude_demographic=args.exclude_demographic,
         use_age_group=args.use_age_group
     )
