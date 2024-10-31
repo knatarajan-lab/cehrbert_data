@@ -42,13 +42,16 @@ class EHRShotUnitTest(unittest.TestCase):
         ])
 
     def test_extract_value(self):
+        current_time = datetime.now()
         # Create DataFrames
         data = self.spark.createDataFrame([
-            ("123.45", "mg"),  # Numeric with unit
-            ("positive", None),  # Categorical answer
-            ("not_available", None),  # Other, unhandled value
-            (None, None),  # None
+            (1, current_time, "123.45", "mg"),  # Numeric with unit
+            (1, current_time, "positive", None),  # Categorical answer
+            (1, current_time, "not_available", None),  # Other, unhandled value
+            (1, current_time, None, None),  # None
         ], schema=StructType([
+            StructField("patient_id", IntegerType(), True),
+            StructField("start", TimestampType(), True),
             StructField("value", StringType(), True),
             StructField("unit", StringType(), True)
         ]))
@@ -67,13 +70,15 @@ class EHRShotUnitTest(unittest.TestCase):
 
         # Define expected data and schema
         expected_data = [
-            ("123.45", "mg", 123.45, None, 9001),  # Numeric with mapped unit
-            ("positive", None, None, 2001, None),  # Categorical with mapped answer
-            ("not_available", None, None, 0, None),  # Unmatched
-            (None, None, None, None, None)  # None
+            (1, current_time, "123.45", "mg", 123.45, None, 9001),  # Numeric with mapped unit
+            (1, current_time, "positive", None, None, 2001, None),  # Categorical with mapped answer
+            (1, current_time, "not_available", None, None, 0, None),  # Unmatched
+            (1, current_time, None, None, None, None, None)  # None
         ]
 
         expected_schema = StructType([
+            StructField("patient_id", IntegerType(), True),
+            StructField("start", TimestampType(), True),
             StructField("value_source_value", StringType(), True),
             StructField("unit_source_value", StringType(), True),
             StructField("value_as_number", FloatType(), True),
@@ -116,16 +121,14 @@ class EHRShotUnitTest(unittest.TestCase):
 
         # Define expected data and schema
         expected_data = [
-            (1, "ICD10/1234", "ICD10", "1234", 1001),  # Match with concept_id 1001
-            (2, "SNOMED/5678", "SNOMED", "5678", 1002),  # Match with concept_id 1002
-            (3, "ICD10/0000", "ICD10", "0000", 0)  # No match, default concept_id 0
+            (1, "ICD10/1234", 1001),  # Match with concept_id 1001
+            (2, "SNOMED/5678", 1002),  # Match with concept_id 1002
+            (3, "ICD10/0000", 0)  # No match, default concept_id 0
         ]
 
         expected_schema = StructType([
             StructField("patient_id", IntegerType(), True),
             StructField("code", StringType(), True),
-            StructField("vocabulary_id", StringType(), True),
-            StructField("concept_code", StringType(), True),
             StructField("concept_id", IntegerType(), True)
         ])
 

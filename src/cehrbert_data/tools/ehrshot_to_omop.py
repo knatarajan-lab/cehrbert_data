@@ -401,6 +401,9 @@ def convert_code_to_omop_concept(
     mapping `ICD10` vocabulary and `1234` code to a specific OMOP concept ID, this function will add
     `concept_id` to `data` where values are mapped as per the `concept` DataFrame.
     """
+    output_columns = [data[_] for _ in data.schema.fieldNames()] + [
+        f.coalesce(concept["concept_id"], f.lit(0)).alias("concept_id")
+    ]
     data = data.withColumn(
         "vocabulary_id",
         f.split(field, "/")[0]
@@ -408,9 +411,6 @@ def convert_code_to_omop_concept(
         "concept_code",
         f.split(field, "/")[1]
     )
-    output_columns = [data[_] for _ in data.schema.fieldNames()] + [
-        f.coalesce(concept["concept_id"], f.lit(0)).alias("concept_id")
-    ]
     return data.join(
         concept,
         on=(data["vocabulary_id"] == concept["vocabulary_id"]) & (data["concept_code"] == concept["concept_code"]),
@@ -462,7 +462,7 @@ def main(args):
     for vocabulary_table in VOCABULARY_TABLES:
         if not os.path.exists(os.path.join(args.output_folder, vocabulary_table)):
             shutil.copytree(
-                os.path.join(args.input_folder, vocabulary_table),
+                os.path.join(args.vocabulary_folder, vocabulary_table),
                 os.path.join(args.output_folder, vocabulary_table),
             )
 
