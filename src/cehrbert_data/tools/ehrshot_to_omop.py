@@ -297,12 +297,12 @@ def main(args):
     spark = SparkSession.builder.appName("Convert EHRShot Data").getOrCreate()
 
     logger.info(
-        f"input_folder: {args.ehr_shot_path}\n"
+        f"ehr_shot_file: {args.ehr_shot_file}\n"
         f"output_folder: {args.output_folder}\n"
     )
 
     ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
-        args.ehr_shot_path
+        args.ehr_shot_file
     )
     concept = spark.read.parquet(os.path.join(args.vocabulary_folder, "concept"))
 
