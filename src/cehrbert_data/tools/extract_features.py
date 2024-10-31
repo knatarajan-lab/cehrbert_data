@@ -126,20 +126,21 @@ def main(args):
         (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
     ).select([ehr_records[_] for _ in ehr_records.schema.fieldNames()] + [cohort["index_date"], cohort["label"]])
 
+    cohort_folder = str(os.path.join(args.output_folder, args.cohort_name))
     if args.patient_splits_folder:
         patient_splits = spark.read.parquet(args.patient_splits_folder)
         cohort.join(patient_splits, "person_id").write.mode(
             "overwrite"
-        ).parquet(os.path.join(args.output_folder, "temp"))
+        ).parquet(os.path.join(cohort_folder, "temp"))
         # Reload the data from the disk
-        cohort = spark.read.parquet(os.path.join(args.output_folder, "temp"))
+        cohort = spark.read.parquet(os.path.join(cohort_folder, "temp"))
         cohort.where('split="train"').write.mode("overwrite").parquet(
-            os.path.join(args.output_folder, "train")
+            os.path.join(cohort_folder, "train")
         )
-        cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(args.output_folder, "test"))
-        shutil.rmtree(os.path.join(args.output_folder, "temp"))
+        cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(cohort_folder, "test"))
+        shutil.rmtree(os.path.join(cohort_folder, "temp"))
     else:
-        cohort.write.mode("overwrite").parquet(args.output_folder)
+        cohort.write.mode("overwrite").parquet(cohort_folder)
 
 
 if __name__ == "__main__":
