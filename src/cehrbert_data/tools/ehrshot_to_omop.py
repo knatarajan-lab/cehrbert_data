@@ -487,6 +487,49 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
     return data.join(visit, on=["patient_id", "visit_order"]).drop("visit_order", "patient_event_order")
 
 
+def drop_duplicate_visits(data: DataFrame) -> DataFrame:
+    """
+    Removes duplicate visits based on visit priority, retaining a single record per `visit_id`.
+
+    This function identifies duplicate visits by `visit_id` and assigns a priority to each visit type.
+    Visits with the highest priority (lowest priority value) are retained, while others are dropped.
+    Priority is assigned based on the `code` column:
+    - "Visit/IP" and "Visit/ERIP" have the highest priority (1),
+    - "Visit/ER" has medium priority (2),
+    - All other visit types have the lowest priority (3).
+
+    The function returns a DataFrame with only the highest-priority visit per `visit_id`.
+
+    Parameters
+    ----------
+    data : DataFrame
+        A PySpark DataFrame containing the following columns:
+        - `visit_id`: Unique identifier for each visit.
+        - `code`: String code indicating the type of visit, which determines visit priority.
+
+    Returns
+    -------
+    DataFrame
+        The input DataFrame with duplicates removed based on `visit_id` and `code` priority.
+        Only the highest-priority visit is retained for each `visit_id`.
+    """
+    data = data.withColumn(
+        "priority",
+        f.when(f.col("code").isin(["Visit/IP", "Visit/ERIP"]), 1).otherwise(
+            f.when(f.col("code") == "Visit/ER", 2).otherwise(3)
+        )
+    ).withColumn(
+        "visit_rank",
+        f.row_number().over(Window.partitionBy("visit_id").orderBy(f.col("priority")))
+    ).where(
+        f.col("visit_rank") == 1
+    ).drop(
+        "visit_rank",
+        "priority"
+    )
+    return data
+
+
 def main(args):
     spark = SparkSession.builder.appName("Convert EHRShot Data").getOrCreate()
 
@@ -528,20 +571,7 @@ def main(args):
 
         # There could be multiple visit
         if domain_table_name == "visit_occurrence":
-            domain_table = domain_table.withColumn(
-                "priority",
-                f.when(f.col("code").isin(["Visit/IP", "Visit/ERIP"]), 1).otherwise(
-                    f.when(f.col("code") == "Visit/ER", 2).otherwise(3)
-                )
-            ).withColumn(
-                "visit_rank",
-                f.row_number().over(Window.partitionBy("visit_id").orderBy(f.col("priority")))
-            ).where(
-                f.col("visit_rank") == 1
-            ).drop(
-                "visit_rank",
-                "priority"
-            )
+            domain_table = drop_duplicate_visits(domain_table)
 
         domain_table.drop(
             *original_columns

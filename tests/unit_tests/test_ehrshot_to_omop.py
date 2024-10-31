@@ -4,7 +4,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, FloatType
 from cehrbert_data.tools.ehrshot_to_omop import (
-    map_unit, map_answer, create_omop_person, convert_code_to_omop_concept, extract_value, generate_visit_id
+    map_unit,
+    map_answer,
+    create_omop_person,
+    convert_code_to_omop_concept,
+    extract_value,
+    generate_visit_id,
+    drop_duplicate_visits
 )
 
 
@@ -91,6 +97,47 @@ class EHRShotUnitTest(unittest.TestCase):
         self.assertEqual(
             1, patient_3_visits, "Patient 2 should have one visit as events are within time interval."
         )
+
+    def test_drop_duplicate_visits(self):
+        # Define schema for input DataFrame
+        schema = StructType([
+            StructField("visit_id", IntegerType(), True),
+            StructField("code", StringType(), True)
+        ])
+
+        # Sample data with duplicate visit IDs and varying priorities
+        data = [
+            (1, "Visit/IP"),  # Highest priority for visit_id 1
+            (1, "Visit/ER"),  # Lower priority for visit_id 1
+            (2, "Visit/OP"),  # Lowest priority for visit_id 2
+            (2, "Visit/ER"),  # Medium priority for visit_id 2
+            (3, "Visit/ERIP"),  # Highest priority for visit_id 3
+            (3, "Visit/OP"),  # Lower priority for visit_id 3
+            (4, "Visit/OP")  # Highest priority for visit_id 4
+        ]
+
+        # Create DataFrame
+        data = self.spark.createDataFrame(data, schema=schema)
+
+        # Run the function to drop duplicates
+        result_df = drop_duplicate_visits(data)
+
+        # Define expected data and schema
+        expected_data = [
+            (1, "Visit/IP"),  # Only highest priority Visit/IP retained for visit_id 1
+            (2, "Visit/ER"),  # Only medium priority Visit/ER retained for visit_id 2
+            (3, "Visit/ERIP"),  # Only highest priority Visit/ERIP retained for visit_id 3
+            (4, "Visit/OP")  # Only highest priority Visit/OP retained for visit_id 3
+        ]
+
+        expected_df = self.spark.createDataFrame(expected_data, schema=data.schema)
+
+        # Collect results for comparison
+        actual_data = result_df.sort("visit_id").collect()
+        expected_data = expected_df.sort("visit_id").collect()
+
+        # Check that the actual data matches the expected data
+        self.assertEqual(actual_data, expected_data, "The DataFrames do not match the expected result.")
 
     def test_extract_value(self):
         current_time = datetime.now()
