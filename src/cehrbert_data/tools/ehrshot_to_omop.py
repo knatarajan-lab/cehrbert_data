@@ -588,7 +588,7 @@ def main(args):
                     f.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
                     f.lit(0).cast(t.IntegerType())
                 ).otherwise(f.lit(None).cast(t.IntegerType()))
-            ).withColumnRenamed("visit_id", "visit_occurrence_id")
+            )
         else:
             # Adding the domain table id
             domain_table = domain_table.withColumn(
