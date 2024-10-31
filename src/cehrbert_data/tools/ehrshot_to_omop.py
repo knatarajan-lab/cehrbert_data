@@ -64,7 +64,7 @@ observation_mapping = {
 death_mapping = {
     "patient_id": "person_id",
     "start": "death_datetime",
-    "code": "observation_source_value",
+    "code": "death_source_value",
 }
 
 table_mapping = {
@@ -75,6 +75,16 @@ table_mapping = {
     "measurement": measurement_mapping,
     "observation": observation_mapping,
     "death": death_mapping
+}
+
+concept_id_mapping = {
+    "visit_occurrence": "visit_concept_id",
+    "condition_occurrence": "condition_concept_id",
+    "procedure_occurrence": "procedure_concept_id",
+    "drug_exposure": "drug_concept_id",
+    "measurement": "measurement_concept_id",
+    "observation": "observation_concept_id",
+    "death": "death_type_concept_id"
 }
 
 
@@ -435,10 +445,19 @@ def main(args):
                 )
             else:
                 domain_table = domain_table.withColumn(omop_column, f.col(column))
+
         if "value" in mappings:
             domain_table = extract_value(domain_table, concept)
-        domain_table.drop(*original_columns)
-        domain_table.write.mode("overwrite").parquet(os.path.join(args.output_folder, domain_table_name))
+
+        domain_table = convert_code_to_omop_concept(
+            domain_table, concept, "code"
+        ).withColumnRenamed("concept_id", concept_id_mapping[domain_table_name])
+
+        domain_table.drop(
+            *original_columns
+        ).write.mode("overwrite").parquet(
+            os.path.join(args.output_folder, domain_table_name)
+        )
 
     for vocabulary_table in VOCABULARY_TABLES:
         if not os.path.exists(os.path.join(args.output_folder, vocabulary_table)):
