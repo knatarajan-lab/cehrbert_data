@@ -138,23 +138,24 @@ def create_omop_person(
     )
 
 
-def map_unit(data: DataFrame, concept: DataFrame) -> DataFrame:
+def map_unit(
+        data: DataFrame,
+        concept: DataFrame
+) -> DataFrame:
     # Find the unit mapping from the concept table
     unit_df = data.select("unit").distinct().join(
-        concept.where(f.col("domain_id") == "Unit"), data["unit"] == concept["concept_code"],
-        "left_outer"
+        concept.where(f.col("domain_id") == "Unit"),
+        on=data["unit"] == concept["concept_code"],
+        how="left_outer"
     ).select(
         data["unit"],
         f.coalesce(concept["concept_id"], f.lit(0)).alias("unit_concept_id")
     )
-    return unit_df.withColumn(
+    unit_df = unit_df.withColumn(
         "order",
         f.row_number().over(Window.partitionBy(f.col("unit")).orderBy(f.col("unit_concept_id")))
-    ).where(
-        f.col("order") == 1
-    ).drop("order").join(
-        unit_df, "unit"
-    )
+    ).where(f.col("order") == 1).drop("order")
+    return data.join(unit_df, "unit", "left_outer")
 
 
 def map_answer(
@@ -163,20 +164,20 @@ def map_answer(
 ) -> DataFrame:
     answer_df = data.select("value").distinct().join(
         concept.where(f.col("domain_id") == "Meas Value"),
-        data["value"] == concept["concept_name"]
+        data["value"] == concept["concept_name"],
+        how="left_outer"
     ).select(
         data["value"],
         f.coalesce(concept["concept_id"], f.lit(0)).alias("value_as_concept_id")
     )
 
-    return answer_df.withColumn(
+    answer_df = answer_df.withColumn(
         "order",
         f.row_number().over(Window.partitionBy(f.col("value")).orderBy(f.col("value_as_concept_id")))
-    ).where(
-        f.col("order") == 1
-    ).drop("order").join(
-        answer_df, "value"
+    ).where(f.col("order") == 1).drop(
+        "order"
     )
+    return data.join(answer_df, "value", "left_outer")
 
 
 def extract_value(
@@ -229,7 +230,6 @@ def convert_code_to_omop_concept(
         concept: DataFrame,
         field: str
 ) -> DataFrame:
-
     data = data.withColumn(
         "vocabulary_id",
         f.split(field, "/")[0]
