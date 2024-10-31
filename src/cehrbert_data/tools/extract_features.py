@@ -120,11 +120,21 @@ def main(args):
         exclude_demographic=args.exclude_demographic,
         use_age_group=args.use_age_group
     )
+    cohort = cohort.join(
+        person.select("person_id", "year_of_birth"),
+        "person_id"
+    ).withColumn(
+        "age",
+        f.year("index_date") - f.col("year_of_birth")
+    ).drop("year_of_birth")
 
     cohort = ehr_records.join(
         cohort,
         (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
-    ).select([ehr_records[_] for _ in ehr_records.schema.fieldNames()] + [cohort["index_date"], cohort["label"]])
+    ).select(
+        [ehr_records[_] for _ in ehr_records.schema.fieldNames()]
+        + [cohort["age"], cohort["index_date"], cohort["label"]]
+    )
 
     cohort_folder = str(os.path.join(args.output_folder, args.cohort_name))
     if args.patient_splits_folder:
