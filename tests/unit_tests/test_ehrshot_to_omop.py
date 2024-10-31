@@ -54,17 +54,19 @@ class EHRShotUnitTest(unittest.TestCase):
             StructField("patient_id", IntegerType(), True),
             StructField("start", TimestampType(), True),
             StructField("end", TimestampType(), True),
-            StructField("visit_id", IntegerType(), True)
+            StructField("visit_id", IntegerType(), True),
+            StructField("omop_table", StringType(), True),
         ])
 
         # Sample data with multiple events for each patient and different time gaps
         data = [
-            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None),
-            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20), None),  # 11-hour gap (merged visit)
-            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), None),  # another visit
-            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None),
-            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None),  # same visit for patient 2
-            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1000)
+            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "visit_occurrence"),
+            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20), None, "condition_occurrence"),  # 11-hour gap (merged visit)
+            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), None, "visit_occurrence"),  # another visit
+            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "visit_occurrence"),
+            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None, "condition_occurrence"),  # same visit for patient 2
+            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1000, "visit_occurrence"),
+            (4, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "condition_occurrence")
         ]
 
         # Create DataFrame
@@ -72,8 +74,8 @@ class EHRShotUnitTest(unittest.TestCase):
         # Run the function to generate visit IDs
         result_df = generate_visit_id(data, time_interval=12)
         # Validate the number of visits
-        self.assertEqual(result_df.select("visit_id").distinct().count(), 4)
-        self.assertEqual(result_df.count(), 6)
+        self.assertEqual(4, result_df.select("visit_id").where(f.col("visit_id").isNotNull()).distinct().count())
+        self.assertEqual(7, result_df.count())
 
         # Check that visit_id was generated as an integer (bigint)
         self.assertEqual(
@@ -96,7 +98,12 @@ class EHRShotUnitTest(unittest.TestCase):
 
         patient_3_visits = result_df.filter(f.col("patient_id") == 3).select("visit_id").distinct().count()
         self.assertEqual(
-            1, patient_3_visits, "Patient 2 should have one visit as events are within time interval."
+            1, patient_3_visits, "Patient 3 should have 1 visit as events are within time interval."
+        )
+
+        patient_4_visits = result_df.filter(f.col("patient_id") == 4).select("visit_id").collect()[0].visit_id
+        self.assertEqual(
+            None, patient_4_visits, "Patient 4 should have a null visit_id."
         )
 
     def test_drop_duplicate_visits(self):
