@@ -229,7 +229,7 @@ def extract_value(
     numeric_pattern = "^[+-]?\\d*\\.?\\d+$"
     # Add a new column 'is_numeric' to check if 'value' is numeric
     df = data.withColumn(
-        "is_eric",
+        "is_numeric",
         f.regexp_extract(f.col("value"), numeric_pattern, 0) != ""
     )
 
@@ -240,7 +240,7 @@ def extract_value(
             "value_as_number",
             f.col("value").cast(t.FloatType())
         ).withColumn(
-            "value_as_concept", f.lit(None).cast(t.IntegerType())
+            "value_as_concept_id", f.lit(None).cast(t.IntegerType())
         ),
         concept
     )
@@ -250,6 +250,8 @@ def extract_value(
             ~f.col("is_numeric")
         ).withColumn(
             "unit_concept_id", f.lit(None).cast(t.IntegerType())
+        ).withColumn(
+            "value_as_number", f.lit(None).cast(t.FloatType())
         ),
         concept
     )
@@ -257,14 +259,16 @@ def extract_value(
     other_df = df.where(f.col("is_numeric").isNull()).withColumn(
         "unit_concept_id", f.lit(None).cast(t.IntegerType())
     ).withColumn(
-        "value_as_concept", f.lit(None).cast(t.IntegerType())
+        "value_as_number", f.lit(None).cast(t.FloatType())
+    ).withColumn(
+        "value_as_concept_id", f.lit(None).cast(t.IntegerType())
     )
 
     return numeric_df.unionByName(categorical_df).unionByName(other_df).withColumnRenamed(
         "value", "value_source_value"
     ).withColumnRenamed(
         "unit", "unit_source_value"
-    )
+    ).drop("is_numeric")
 
 
 def convert_code_to_omop_concept(
