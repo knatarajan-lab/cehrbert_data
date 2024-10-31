@@ -122,16 +122,16 @@ def main(args):
         patient_splits = spark.read.parquet(args.patient_splits_folder)
         cohort.join(patient_splits, "person_id").write.mode(
             "overwrite"
-        ).parquet(os.path.join(args.output_data_folder, "temp"))
+        ).parquet(os.path.join(args.output_folder, "temp"))
         # Reload the data from the disk
-        cohort = spark.read.parquet(os.path.join(args.output_data_folder, "temp"))
+        cohort = spark.read.parquet(os.path.join(args.output_folder, "temp"))
         cohort.where('split="train"').write.mode("overwrite").parquet(
-            os.path.join(args.output_data_folder, "train")
+            os.path.join(args.output_folder, "train")
         )
-        cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(args.output_data_folder, "test"))
-        shutil.rmtree(os.path.join(args.output_data_folder, "temp"))
+        cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(args.output_folder, "test"))
+        shutil.rmtree(os.path.join(args.output_folder, "temp"))
     else:
-        cohort.write.mode("overwrite").parquet(args.output_data_folder)
+        cohort.write.mode("overwrite").parquet(args.output_folder)
 
 
 if __name__ == "__main__":

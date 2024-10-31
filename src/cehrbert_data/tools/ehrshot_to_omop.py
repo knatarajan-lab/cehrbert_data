@@ -1,6 +1,7 @@
 import os
 import logging
 import argparse
+import shutil
 from cehrbert_data.utils.logging_utils import add_console_logging
 
 from pyspark.sql import SparkSession, DataFrame
@@ -11,6 +12,8 @@ from pyspark.sql.window import Window
 # Enable logging
 add_console_logging()
 logger = logging.getLogger(__name__)
+
+VOCABULARY_TABLES = ["concept", "concept_relationship", "concept_ancestor"]
 
 visit_occurrence_mapping = {
     "patient_id": "person_id",
@@ -406,7 +409,6 @@ def convert_code_to_omop_concept(
 
 
 def main(args):
-
     spark = SparkSession.builder.appName("Convert EHRShot Data").getOrCreate()
 
     logger.info(
@@ -437,6 +439,13 @@ def main(args):
             domain_table = extract_value(domain_table, concept)
         domain_table.drop(*original_columns)
         domain_table.write.mode("overwrite").parquet(os.path.join(args.output_folder, domain_table_name))
+
+    for vocabulary_table in VOCABULARY_TABLES:
+        if not os.path.exists(os.path.join(args.output_folder, vocabulary_table)):
+            shutil.copytree(
+                os.path.join(args.input_folder, vocabulary_table),
+                os.path.join(args.output_folder, vocabulary_table),
+            )
 
 
 if __name__ == "__main__":
