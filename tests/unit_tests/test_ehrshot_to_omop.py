@@ -1,8 +1,8 @@
 import unittest
-import numpy as np
+from datetime import datetime
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
-from cehrbert_data.tools.ehrshot_to_omop import map_unit, map_answer
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
+from cehrbert_data.tools.ehrshot_to_omop import map_unit, map_answer, create_omop_person
 
 
 # Define the test case
@@ -31,6 +31,55 @@ class EHRShotUnitTest(unittest.TestCase):
             (2, "Rare", "LA15679-6", "Meas Value", "LOINC"),
         ], concept_schema)
 
+        # Define schemas for input DataFrames
+        self.ehrshot_schema = StructType([
+            StructField("omop_table", StringType(), True),
+            StructField("patient_id", IntegerType(), True),
+            StructField("code", StringType(), True),
+            StructField("start", TimestampType(), True)
+        ])
+
+    def test_create_omop_person(self):
+        # Sample concept data for mapping demographic codes to concept_ids
+        concept_data = [
+            ("Gender", "Male", 8507),  # concept_id for male gender
+            ("Ethnicity", "Hispanic", 38003563),  # concept_id for Hispanic ethnicity
+            ("Race", "White", 8527)  # concept_id for White race
+        ]
+        concept = self.spark.createDataFrame(concept_data, schema=StructType([
+            StructField("vocabulary_id", StringType(), True),
+            StructField("concept_code", StringType(), True),
+            StructField("concept_id", IntegerType(), True)
+        ]))
+        # Sample EHR data simulating the "person" table with various demographic attributes
+        ehr_data = [
+            ("person", 1, "SNOMED/3950001", datetime(1980, 1, 1, 0, 0, 0)),  # birth_datetime
+            ("person", 1, "Gender/Male", None),  # gender
+            ("person", 1, "Ethnicity/Hispanic", None),  # ethnicity
+            ("person", 1, "Race/White", None)  # race
+        ]
+        ehr_shot_data = self.spark.createDataFrame(ehr_data, schema=self.ehrshot_schema)
+        expected_schema = StructType([
+            StructField("person_id", IntegerType(), True),
+            StructField("birth_datetime", TimestampType(), True),
+            StructField("year_of_birth", IntegerType(), True),
+            StructField("month_of_birth", IntegerType(), True),
+            StructField("day_of_birth", IntegerType(), True),
+            StructField("gender_concept_id", IntegerType(), True),
+            StructField("gender_source_value", StringType(), True),
+            StructField("ethnicity_concept_id", IntegerType(), True),
+            StructField("ethnicity_source_value", StringType(), True),
+            StructField("race_concept_id", IntegerType(), True),
+            StructField("race_source_value", StringType(), True)
+        ])
+        expected_data = [
+            (1, datetime(1980, 1, 1, 0, 0, 0),
+             1980, 1, 1, 8507, "Gender/Male", 38003563, "Ethnicity/Hispanic", 8527, "Race/White")
+        ]
+        expected_df = self.spark.createDataFrame(expected_data, schema=expected_schema)
+        actual_df = create_omop_person(ehr_shot_data, concept)
+        self.assertEqual(expected_df.collect(), actual_df.collect())
+
     def test_map_answer(self):
         data = self.spark.createDataFrame([
             ("%", "1.2"), ("%", "2.2"), (None, "Rare"), (None, "unknown"), ("unknown", None)
@@ -50,8 +99,10 @@ class EHRShotUnitTest(unittest.TestCase):
         )
 
         # Collect the actual and expected results
-        actual_result = mapped_answer.sort(mapped_answer.schema.fieldNames()).toPandas().fillna(value=-1).to_dict(orient="records")
-        expected_result = expected_df.sort(expected_df.schema.fieldNames()).toPandas().fillna(value=-1).to_dict(orient="records")
+        actual_result = mapped_answer.sort(mapped_answer.schema.fieldNames()).toPandas().fillna(value=-1).to_dict(
+            orient="records")
+        expected_result = expected_df.sort(expected_df.schema.fieldNames()).toPandas().fillna(value=-1).to_dict(
+            orient="records")
 
         # Compare the actual and expected results
         self.assertListEqual(actual_result, expected_result)

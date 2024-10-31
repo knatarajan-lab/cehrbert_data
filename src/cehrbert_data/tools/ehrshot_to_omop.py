@@ -94,6 +94,48 @@ def create_omop_person(
         ehr_shot_data: DataFrame,
         concept: DataFrame,
 ) -> DataFrame:
+    """
+    Transforms EHR data into the OMOP-compliant `person` table format.
+
+    This function extracts and transforms specific attributes from the input
+    `ehr_shot_data` to match the OMOP `person` table schema, incorporating
+    concepts for `birth_datetime`, `gender`, `ethnicity`, and `race`. The function
+    filters for relevant information and performs necessary joins to return a unified
+    `person` DataFrame in OMOP format.
+
+    Parameters
+    ----------
+    ehr_shot_data : DataFrame
+        Source DataFrame containing raw EHR data, with columns that include `omop_table`,
+        `code`, `start`, and `patient_id`, from which the function filters records for
+        the `person` table.
+
+    concept : DataFrame
+        DataFrame containing mappings of codes to OMOP concepts, used by helper functions
+        to convert source-specific codes (for gender, ethnicity, and race) into OMOP-compatible
+        concept IDs.
+
+    Returns
+    -------
+    DataFrame
+        OMOP-compliant `person` DataFrame with the following columns:
+        - `person_id`: Unique identifier for each individual.
+        - `birth_datetime`: Date and time of birth.
+        - `year_of_birth`, `month_of_birth`, `day_of_birth`: Year, month, and day extracted from `birth_datetime`.
+        - `gender_concept_id`, `gender_source_value`: OMOP concept ID and original code for gender.
+        - `ethnicity_concept_id`, `ethnicity_source_value`: OMOP concept ID and original code for ethnicity.
+        - `race_concept_id`, `race_source_value`: OMOP concept ID and original code for race.
+
+    Notes
+    -----
+    - `birth_datetime` is identified by the code `SNOMED/3950001` in the `ehr_shot_data`.
+    - `gender`, `ethnicity`, and `race` fields are filtered based on code prefixes
+      "Gender", "Ethnicity", and "Race" respectively.
+    - Joins are performed to ensure all demographic attributes are associated
+      with each `person_id` from `birth_datetime`, with left outer joins to retain
+      records even when some fields are missing.
+
+    """
     omop_person = ehr_shot_data.where(f.col("omop_table") == "person")
     birth_datetime = omop_person.where(f.col("code") == "SNOMED/3950001").select(
         f.col("patient_id").alias("person_id"),
@@ -237,7 +279,9 @@ def convert_code_to_omop_concept(
         "concept_code",
         f.split(field, "/")[1]
     )
-    output_columns = [data[_] for _ in data.schema.fieldNames()] + [f.coalesce(concept["concept_id"], f.lit(0))]
+    output_columns = [data[_] for _ in data.schema.fieldNames()] + [
+        f.coalesce(concept["concept_id"], f.lit(0)).alias("concept_id")
+    ]
     return data.join(
         concept,
         on=(data["vocabulary_id"] == concept["vocabulary_id"]) & (data["concept_code"] == concept["concept_code"]),
@@ -268,7 +312,7 @@ def main(args):
             domain_table = domain_table.withColumn(omop_column, f.col(column))
         if "value" in mappings:
             domain_table = extract_value(domain_table, concept)
-        domain_table.drop(original_columns)
+        domain_table.drop(*original_columns)
         domain_table.write.mode("overwrite").parquet(os.path.join(args.output_folder, domain_table_name))
 
 
