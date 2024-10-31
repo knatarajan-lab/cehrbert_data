@@ -1,9 +1,10 @@
 import unittest
 from datetime import datetime
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as f
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, FloatType
 from cehrbert_data.tools.ehrshot_to_omop import (
-    map_unit, map_answer, create_omop_person, convert_code_to_omop_concept, extract_value
+    map_unit, map_answer, create_omop_person, convert_code_to_omop_concept, extract_value, generate_visit_id
 )
 
 
@@ -40,6 +41,56 @@ class EHRShotUnitTest(unittest.TestCase):
             StructField("code", StringType(), True),
             StructField("start", TimestampType(), True)
         ])
+
+    def test_generate_visit_id(self):
+        # Define schema for input DataFrame
+        schema = StructType([
+            StructField("patient_id", IntegerType(), True),
+            StructField("start", TimestampType(), True),
+            StructField("end", TimestampType(), True)
+        ])
+
+        # Sample data with multiple events for each patient and different time gaps
+        data = [
+            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9)),
+            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20)),  # 11-hour gap (merged visit)
+            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20)),  # another visit
+            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9)),
+            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11)),  # same visit for patient 2
+            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9))
+        ]
+
+        # Create DataFrame
+        data = self.spark.createDataFrame(data, schema=schema)
+        # Run the function to generate visit IDs
+        result_df = generate_visit_id(data, time_interval=12)
+        # Validate the number of visits
+        self.assertEqual(result_df.select("visit_id").distinct().count(), 4)
+        self.assertEqual(result_df.count(), 6)
+
+        # Check that visit_id was generated as an integer (bigint)
+        self.assertEqual(
+            result_df.schema["visit_id"].dataType.simpleString(), "bigint",
+            "visit_id should be of type bigint"
+        )
+
+        # Validate visit_id assignment based on time interval gaps
+        patient_1_visits = result_df.filter(f.col("patient_id") == 1).select("visit_id").distinct().count()
+        self.assertEqual(
+            2,
+            patient_1_visits,
+            "Patient 1 should have three distinct visits based on time interval."
+        )
+
+        patient_2_visits = result_df.filter(f.col("patient_id") == 2).select("visit_id").distinct().count()
+        self.assertEqual(
+            1, patient_2_visits, "Patient 2 should have one visit as events are within time interval."
+        )
+
+        patient_3_visits = result_df.filter(f.col("patient_id") == 3).select("visit_id").distinct().count()
+        self.assertEqual(
+            1, patient_3_visits, "Patient 2 should have one visit as events are within time interval."
+        )
 
     def test_extract_value(self):
         current_time = datetime.now()

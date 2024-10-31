@@ -418,6 +418,75 @@ def convert_code_to_omop_concept(
     ).select(output_columns)
 
 
+def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
+    """
+    Generates unique `visit_id`s for each visit based on time intervals between events per patient.
+
+    This function identifies distinct visits within a patient's event history by analyzing time gaps
+    between consecutive events. Events with gaps exceeding the specified `time_interval` (in hours)
+    are considered separate visits. A unique integer `visit_id` is then assigned to each visit
+    using a hash of the patient ID and visit order.
+
+    Parameters
+    ----------
+    data : DataFrame
+        A PySpark DataFrame containing at least the following columns:
+        - `patient_id`: Identifier for each patient.
+        - `start`: Start timestamp of the event.
+        - `end`: (Optional) End timestamp of the event.
+
+    time_interval : int, optional, default=12
+        The maximum time gap in hours between consecutive events within the same visit. If the time
+        difference between two events exceeds this interval, a new visit is assigned.
+
+    Returns
+    -------
+    DataFrame
+        The input DataFrame with an additional `visit_id` column, which is a unique integer identifier
+        for each visit, and each `patient_id`'s events are grouped according to visit.
+    """
+    data = data.repartition(16)
+    order_window = Window.partitionBy("patient_id").orderBy(f.col("start"))
+
+    data = data.withColumn(
+        "patient_event_order", f.row_number().over(order_window)
+    ).withColumn(
+        "time", f.coalesce(f.col("end"), f.col("start"))
+    ).withColumn(
+        "prev_time", f.coalesce(f.lag(f.col("time")).over(order_window), f.col("time"))
+    ).withColumn(
+        "hour_diff", (f.unix_timestamp("start") - f.unix_timestamp("prev_time")) / 3600
+    ).withColumn(
+        "is_gap", (f.col("hour_diff") > time_interval).cast(t.IntegerType())
+    ).drop(
+        "time", "prev_time", "hour_diff"
+    )
+
+    cumulative_window = Window.partitionBy("patient_id").orderBy("patient_event_order").rowsBetween(
+        Window.unboundedPreceding,
+        Window.currentRow
+    )
+
+    data = data.withColumn(
+        "visit_order",
+        f.sum("is_gap").over(cumulative_window)
+    ).drop(
+        "is_gap"
+    )
+
+    visit = data.select("patient_id", "visit_order").distinct().withColumn(
+        "visit_id",
+        f.abs(
+            f.hash(f.concat(f.col("patient_id").cast("string"), f.col("visit_order").cast("string")))
+        ).cast("bigint")
+    )
+
+    # Validate the uniqueness of visit_id
+    visit.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1))
+    # Join the generated visit_id back to data
+    return data.join(visit, on=["patient_id", "visit_order"]).drop("visit_order", "patient_event_order")
+
+
 def main(args):
     spark = SparkSession.builder.appName("Convert EHRShot Data").getOrCreate()
 
@@ -428,6 +497,10 @@ def main(args):
 
     ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
         args.ehr_shot_file
+    )
+    # Add visit_id based on the time intervals between neighboring events
+    ehr_shot_data = generate_visit_id(
+        ehr_shot_data
     )
     concept = spark.read.parquet(os.path.join(args.vocabulary_folder, "concept"))
 
@@ -452,6 +525,23 @@ def main(args):
         domain_table = convert_code_to_omop_concept(
             domain_table, concept, "code"
         ).withColumnRenamed("concept_id", concept_id_mapping[domain_table_name])
+
+        # There could be multiple visit
+        if domain_table_name == "visit_occurrence":
+            domain_table = domain_table.withColumn(
+                "priority",
+                f.when(f.col("code").isin(["Visit/IP", "Visit/ERIP"]), 1).otherwise(
+                    f.when(f.col("code") == "Visit/ER", 2).otherwise(3)
+                )
+            ).withColumn(
+                "visit_rank",
+                f.row_number().over(Window.partitionBy("visit_id").orderBy(f.col("priority")))
+            ).where(
+                f.col("visit_rank") == 1
+            ).drop(
+                "visit_rank",
+                "priority"
+            )
 
         domain_table.drop(
             *original_columns
