@@ -124,7 +124,7 @@ def main(args):
     cohort = ehr_records.join(
         cohort,
         (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
-    )
+    ).select([ehr_records[_] for _ in ehr_records.schema.fieldNames()] + [cohort["index_date"], cohort["label"]])
 
     if args.patient_splits_folder:
         patient_splits = spark.read.parquet(args.patient_splits_folder)
