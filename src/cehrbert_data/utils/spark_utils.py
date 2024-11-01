@@ -908,6 +908,7 @@ def extract_ehr_records(
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
             patient_ehr_records["unit"],
+            patient_ehr_records["concept_value"],
             patient_ehr_records["event_group_id"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
