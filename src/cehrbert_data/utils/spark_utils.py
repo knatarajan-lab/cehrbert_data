@@ -1392,7 +1392,7 @@ def get_measurement_table(
         processed_measurement = process_measurement(
             spark, measurement, required_measurement, measurement_stats, concept
         )
-        processed_measurement.write.parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
+        processed_measurement.write.mode("overwrite").parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
 
     return processed_measurement
 
