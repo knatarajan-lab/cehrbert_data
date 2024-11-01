@@ -908,6 +908,7 @@ def extract_ehr_records(
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
             patient_ehr_records["unit"],
+            patient_ehr_records["concept_value"],
             patient_ehr_records["event_group_id"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
@@ -1391,7 +1392,7 @@ def get_measurement_table(
         processed_measurement = process_measurement(
             spark, measurement, required_measurement, measurement_stats, concept
         )
-        processed_measurement.write.parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
+        processed_measurement.write.mode("overwrite").parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
 
     return processed_measurement
 

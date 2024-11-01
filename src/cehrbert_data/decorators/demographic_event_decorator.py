@@ -90,7 +90,7 @@ class DemographicEventDecorator(PatientEventDecorator):
         sequence_gender_token = (
             self._patient_demographic.select(F.col("person_id"), F.col("gender_concept_id"))
             .join(sequence_start_year_token, "person_id")
-            .withColumn("standard_concept_id", F.col("gender_concept_id").cast(T.StringType()))
+            .withColumn("standard_concept_id", F.coalesce(F.col("gender_concept_id"), F.lit(0)).cast(T.StringType()))
             .withColumn("priority", F.lit(GENDER_TOKEN_PRIORITY))
             .drop("gender_concept_id")
         )
@@ -98,7 +98,7 @@ class DemographicEventDecorator(PatientEventDecorator):
         sequence_race_token = (
             self._patient_demographic.select(F.col("person_id"), F.col("race_concept_id"))
             .join(sequence_start_year_token, "person_id")
-            .withColumn("standard_concept_id", F.col("race_concept_id").cast(T.StringType()))
+            .withColumn("standard_concept_id", F.coalesce(F.col("race_concept_id"), F.lit(0)).cast(T.StringType()))
             .withColumn("priority", F.lit(RACE_TOKEN_PRIORITY))
             .drop("race_concept_id")
         )

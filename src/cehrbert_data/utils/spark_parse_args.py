@@ -33,7 +33,7 @@ def valid_date(s):
         raise argparse.ArgumentTypeError(e)
 
 
-def create_spark_args():
+def create_spark_args(parse: bool = True):
     """
     Defines and parses the command-line arguments for Spark applications.
 
@@ -371,4 +371,4 @@ def create_spark_args():
         action="store_true",
         help="Indicate whether we should contribute once to the training data",
     )
-    return parser.parse_args()
+    return parser.parse_args() if parse else parser
