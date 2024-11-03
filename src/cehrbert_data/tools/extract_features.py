@@ -135,7 +135,7 @@ def main(args):
         )
 
     cohort = cohort.join(
-        person.select("person_id", "year_of_birth"),
+        person.select("person_id", "year_of_birth", "race_concept_id", "gender_concept_id"),
         "person_id"
     ).withColumn(
         "age",
@@ -147,7 +147,7 @@ def main(args):
         (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
     ).select(
         [ehr_records[_] for _ in ehr_records.schema.fieldNames()]
-        + [cohort["age"], cohort["index_date"], cohort["label"]]
+        + [cohort["age"], cohort["race_concept_id"], cohort["gender_concept_id"], cohort["index_date"], cohort["label"]]
     )
 
     cohort_folder = str(os.path.join(args.output_folder, args.cohort_name))
