@@ -166,6 +166,7 @@ def main(args):
     else:
         cohort.write.mode("overwrite").parquet(cohort_folder)
 
+    spark.stop()
 
 if __name__ == "__main__":
     main(
