@@ -13,6 +13,8 @@ if __name__ == "__main__":
         args_copy = copy.copy(args)
         individual_cohort_dir = os.path.join(cohort_dir, individual_cohort, "labeled_patients.csv")
         if os.path.exists(individual_cohort_dir):
+            if os.path.exists(os.path.join(individual_cohort_dir, cohort_name)):
+                continue
             args_copy.cohort_dir = individual_cohort_dir
             args_copy.cohort_name = cohort_name
             main(
