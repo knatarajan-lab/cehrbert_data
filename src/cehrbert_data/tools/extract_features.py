@@ -104,6 +104,27 @@ def main(args):
         "gender_concept_id",
     )
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+    # Bound the visit_end_date at the prediction_time
+    visit_occurrence = visit_occurrence.join(
+        cohort.select(f.col("person_id").alias("cohort_person_id"), "index_date"),
+        (f.col("cohort_person_id") == f.col("person_id")) &
+        (f.col("visit_start_date") <= cohort["index_date"]) &
+        (cohort["index_date"] <= f.col("visit_end_date")),
+        "left_outer"
+    ).withColumn(
+        "visit_end_date",
+        f.when(
+            f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
+            f.least(f.col("visit_end_date"), cohort["index_date"])
+        ).otherwise(f.col("visit_end_date"))
+    ).withColumn(
+        "visit_end_datetime",
+        f.when(
+            f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
+            f.least(f.col("visit_end_datetime"), cohort["index_date"])
+        ).otherwise(f.col("visit_end_datetime"))
+    ).drop("index_date", "cohort_person_id")
+
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
         visit_occurrence
@@ -167,6 +188,7 @@ def main(args):
         cohort.write.mode("overwrite").parquet(cohort_folder)
 
     spark.stop()
+
 
 if __name__ == "__main__":
     main(
