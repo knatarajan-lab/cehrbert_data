@@ -143,6 +143,7 @@ def main(args):
                 patient_demographic if args.gpt_patient_sequence else None
             ),
             att_type=AttType.DAY,
+            inpatient_att_type=AttType.DAY,
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group
         )
