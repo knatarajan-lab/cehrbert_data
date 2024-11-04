@@ -156,7 +156,12 @@ def main(args):
         )
 
     cohort = cohort.join(
-        person.select("person_id", "year_of_birth", "race_concept_id", "gender_concept_id"),
+        person.select(
+            "person_id",
+            "year_of_birth",
+            f.col("race_concept_id").cast(t.IntegerType()).alias("race_concept_id"),
+            "gender_concept_id"
+        ),
         "person_id"
     ).withColumn(
         "age",
