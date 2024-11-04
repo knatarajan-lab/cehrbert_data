@@ -159,7 +159,7 @@ def main(args):
         person.select(
             "person_id",
             "year_of_birth",
-            f.col("race_concept_id").cast(t.IntegerType()).alias("race_concept_id"),
+            f.coalesce(f.col("race_concept_id"), f.lit(0)).cast(t.IntegerType()).alias("race_concept_id"),
             "gender_concept_id"
         ),
         "person_id"
