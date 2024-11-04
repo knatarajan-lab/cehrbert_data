@@ -24,7 +24,6 @@ class GenerateTrainingDataTest(PySparkAbstract):
             apply_age_filter=True,
             include_death=False,
             att_type=AttType.DAY,
-            inpatient_att_type=AttType.DAY,
         )
 
 

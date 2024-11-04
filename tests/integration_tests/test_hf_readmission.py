@@ -36,8 +36,6 @@ class HfReadmissionTest(PySparkAbstract):
             "--is_new_patient_representation",
             "--att_type",
             "cehr_bert",
-            "--inpatient_att_type",
-            "mix",
             "--ehr_table_list",
             "condition_occurrence",
             "procedure_occurrence",

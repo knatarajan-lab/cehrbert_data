@@ -3,7 +3,12 @@ from pyspark.sql import DataFrame, functions as F, types as T, Window as W
 from ..const.common import NA
 from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN
 from .patient_event_decorator_base import (
-    PatientEventDecorator, AttType, get_att_function
+    PatientEventDecorator, AttType,
+    time_day_token,
+    time_week_token,
+    time_month_token,
+    time_mix_token,
+    time_token_func
 )
 from .token_priority import (
     ATT_TOKEN_PRIORITY,
@@ -23,14 +28,12 @@ class AttEventDecorator(PatientEventDecorator):
             include_visit_type,
             exclude_visit_tokens,
             att_type: AttType,
-            inpatient_att_type: AttType,
             include_inpatient_hour_token: bool = False,
     ):
         self._visit_occurrence = visit_occurrence
         self._include_visit_type = include_visit_type
         self._exclude_visit_tokens = exclude_visit_tokens
         self._att_type = att_type
-        self._inpatient_att_type = inpatient_att_type
         self._include_inpatient_hour_token = include_inpatient_hour_token
 
     def _decorate(self, patient_events: DataFrame):
@@ -131,7 +134,18 @@ class AttEventDecorator(PatientEventDecorator):
         )
 
         # Udf for calculating the time token
-        time_token_udf = F.udf(get_att_function(self._att_type), T.StringType())
+        if self._att_type == AttType.DAY:
+            att_func = time_day_token
+        elif self._att_type == AttType.WEEK:
+            att_func = time_week_token
+        elif self._att_type == AttType.MONTH:
+            att_func = time_month_token
+        elif self._att_type == AttType.MIX:
+            att_func = time_mix_token
+        else:
+            att_func = time_token_func
+
+        time_token_udf = F.udf(att_func, T.StringType())
 
         att_tokens = (
             visits.withColumn("datetime", F.to_timestamp("date"))
@@ -187,7 +201,6 @@ class AttEventDecorator(PatientEventDecorator):
             inpatient_visits, ["visit_occurrence_id", "cohort_member_id"]
         )
 
-        inpatient_time_token_udf = F.udf(get_att_function(self._inpatient_att_type), T.StringType())
         # Fill in the visit_end_date if null (because some visits are still ongoing at the time of data extraction)
         # Bound the event dates within visit_start_date and visit_end_date
         # Generate a span rank to indicate the position of the group of events
@@ -251,7 +264,7 @@ class AttEventDecorator(PatientEventDecorator):
             )
             inpatient_att_token = F.when(
                 F.col("hour_delta") < 24, F.concat(F.lit("i-H"), F.col("hour_delta"))
-            ).otherwise(F.concat(F.lit("i-"), inpatient_time_token_udf("time_delta")))
+            ).otherwise(F.concat(F.lit("i-"), time_token_udf("time_delta")))
             # Create ATT tokens within the inpatient visits
             inpatient_att_events = (
                 inpatient_events.withColumn(
@@ -293,7 +306,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .where(F.col("prev_date").isNotNull())
                 .withColumn(
                     "standard_concept_id",
-                    F.concat(F.lit("i-"), inpatient_time_token_udf("time_delta")),
+                    F.concat(F.lit("i-"), time_token_udf("time_delta")),
                 )
                 .withColumn("visit_concept_order", F.col("visit_concept_order"))
                 .withColumn("priority", get_inpatient_att_token_priority())

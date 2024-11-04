@@ -306,7 +306,6 @@ class NestedCohortBuilder:
             is_observation_window_unbounded: bool = False,
             is_population_estimation: bool = False,
             att_type: AttType = AttType.CEHR_BERT,
-            inpatient_att_type: AttType = AttType.MIX,
             exclude_demographic: bool = True,
             use_age_group: bool = False,
             single_contribution: bool = False,
@@ -347,7 +346,6 @@ class NestedCohortBuilder:
         )
         self._is_population_estimation = is_population_estimation
         self._att_type = att_type
-        self._inpatient_att_type = inpatient_att_type
         self._exclude_demographic = exclude_demographic
         self._use_age_group = use_age_group
         self._single_contribution = single_contribution
@@ -382,7 +380,6 @@ class NestedCohortBuilder:
             f"is_observation_window_unbounded: {is_observation_window_unbounded}\n"
             f"is_population_estimation: {is_population_estimation}\n"
             f"att_type: {att_type}\n"
-            f"inpatient_att_type: {inpatient_att_type}\n"
             f"exclude_demographic: {exclude_demographic}\n"
             f"use_age_group: {use_age_group}\n"
             f"single_contribution: {single_contribution}\n"
@@ -650,7 +647,6 @@ class NestedCohortBuilder:
                 exclude_visit_tokens=self._exclude_visit_tokens,
                 patient_demographic=(patient_demographic if self._gpt_patient_sequence else None),
                 att_type=self._att_type,
-                inpatient_att_type=self._inpatient_att_type,
                 exclude_demographic=self._exclude_demographic,
                 use_age_group=self._use_age_group,
             )
@@ -767,7 +763,6 @@ def create_prediction_cohort(
         is_observation_window_unbounded=spark_args.is_observation_window_unbounded,
         is_population_estimation=spark_args.is_population_estimation,
         att_type=AttType(spark_args.att_type),
-        inpatient_att_type=AttType(spark_args.inpatient_att_type),
         exclude_demographic=spark_args.exclude_demographic,
         use_age_group=spark_args.use_age_group,
         single_contribution=spark_args.single_contribution,
