@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 import shutil
 from enum import Enum
@@ -19,6 +20,11 @@ class PredictionType(Enum):
     BINARY = "binary"
     MULTICLASS = "multiclass"
     REGRESSION = "regression"
+
+
+def get_visit_occurrence_temp_folder(args) :
+    cleaned_cohort_name = re.sub(r'[^A-Za-z0-9]', '_', args.cohort_name)
+    return os.path.join(args.output_folder, f"{cleaned_cohort_name}_visit_occurrence")
 
 
 def create_feature_extraction_args():
@@ -46,6 +52,10 @@ def create_feature_extraction_args():
         choices=[e.value for e in PredictionType],
         required=False,
         default=PredictionType.BINARY
+    )
+    spark_args.add_argument(
+        '--bound_visit_end_date',
+        action='store_true',
     )
     return spark_args.parse_args()
 
@@ -104,26 +114,30 @@ def main(args):
         "gender_concept_id",
     )
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
-    # Bound the visit_end_date at the prediction_time
-    visit_occurrence = visit_occurrence.join(
-        cohort.select(f.col("person_id").alias("cohort_person_id"), "index_date"),
-        (f.col("cohort_person_id") == f.col("person_id")) &
-        (f.col("visit_start_date") <= cohort["index_date"]) &
-        (cohort["index_date"] <= f.col("visit_end_date")),
-        "left_outer"
-    ).withColumn(
-        "visit_end_date",
-        f.when(
-            f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
-            f.least(f.col("visit_end_date"), cohort["index_date"])
-        ).otherwise(f.col("visit_end_date"))
-    ).withColumn(
-        "visit_end_datetime",
-        f.when(
-            f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
-            f.least(f.col("visit_end_datetime"), cohort["index_date"])
-        ).otherwise(f.col("visit_end_datetime"))
-    ).drop("index_date", "cohort_person_id")
+    if args.bound_visit_end_date:
+        # Bound the visit_end_date at the prediction_time
+        visit_occurrence = visit_occurrence.join(
+            cohort.select(f.col("person_id").alias("cohort_person_id"), "index_date"),
+            (f.col("cohort_person_id") == f.col("person_id")) &
+            (f.col("visit_start_date") <= cohort["index_date"]) &
+            (cohort["index_date"] <= f.col("visit_end_date")),
+            "left_outer"
+        ).withColumn(
+            "visit_end_date",
+            f.when(
+                f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
+                f.least(f.col("visit_end_date"), cohort["index_date"])
+            ).otherwise(f.col("visit_end_date"))
+        ).withColumn(
+            "visit_end_datetime",
+            f.when(
+                f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
+                f.least(f.col("visit_end_datetime"), cohort["index_date"])
+            ).otherwise(f.col("visit_end_datetime"))
+        ).drop("index_date", "cohort_person_id")
+        temp_visit_occurrence = get_visit_occurrence_temp_folder(args)
+        visit_occurrence.write.mode("overwrite").parquet(temp_visit_occurrence)
+        visit_occurrence = spark.read.parquet(temp_visit_occurrence)
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
