@@ -104,6 +104,27 @@ def main(args):
         "gender_concept_id",
     )
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+    # Bound the visit_end_date at the prediction_time
+    visit_occurrence = visit_occurrence.join(
+        cohort.select(f.col("person_id").alias("cohort_person_id"), "index_date"),
+        (f.col("cohort_person_id") == f.col("person_id")) &
+        (f.col("visit_start_date") <= cohort["index_date"]) &
+        (cohort["index_date"] <= f.col("visit_end_date")),
+        "left_outer"
+    ).withColumn(
+        "visit_end_date",
+        f.when(
+            f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
+            f.least(f.col("visit_end_date"), cohort["index_date"])
+        ).otherwise(f.col("visit_end_date"))
+    ).withColumn(
+        "visit_end_datetime",
+        f.when(
+            f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
+            f.least(f.col("visit_end_datetime"), cohort["index_date"])
+        ).otherwise(f.col("visit_end_datetime"))
+    ).drop("index_date", "cohort_person_id")
+
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
         visit_occurrence
@@ -122,6 +143,7 @@ def main(args):
                 patient_demographic if args.gpt_patient_sequence else None
             ),
             att_type=AttType.DAY,
+            inpatient_att_type=AttType.DAY,
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group
         )
@@ -135,7 +157,12 @@ def main(args):
         )
 
     cohort = cohort.join(
-        person.select("person_id", "year_of_birth"),
+        person.select(
+            "person_id",
+            "year_of_birth",
+            f.coalesce(f.col("race_concept_id"), f.lit(0)).cast(t.IntegerType()).alias("race_concept_id"),
+            "gender_concept_id"
+        ),
         "person_id"
     ).withColumn(
         "age",
@@ -147,7 +174,7 @@ def main(args):
         (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
     ).select(
         [ehr_records[_] for _ in ehr_records.schema.fieldNames()]
-        + [cohort["age"], cohort["index_date"], cohort["label"]]
+        + [cohort["age"], cohort["race_concept_id"], cohort["gender_concept_id"], cohort["index_date"], cohort["label"]]
     )
 
     cohort_folder = str(os.path.join(args.output_folder, args.cohort_name))
@@ -165,6 +192,8 @@ def main(args):
         shutil.rmtree(os.path.join(cohort_folder, "temp"))
     else:
         cohort.write.mode("overwrite").parquet(cohort_folder)
+
+    spark.stop()
 
 
 if __name__ == "__main__":
