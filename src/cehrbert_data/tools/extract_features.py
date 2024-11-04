@@ -114,6 +114,7 @@ def main(args):
         "race_concept_id",
         "gender_concept_id",
     )
+    temp_visit_occurrence = get_visit_occurrence_temp_folder(args)
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     if args.bound_visit_end_date:
         # Bound the visit_end_date at the prediction_time
@@ -136,7 +137,6 @@ def main(args):
                 f.least(f.col("visit_end_datetime"), cohort["index_date"])
             ).otherwise(f.col("visit_end_datetime"))
         ).drop("index_date", "cohort_person_id")
-        temp_visit_occurrence = get_visit_occurrence_temp_folder(args)
         visit_occurrence.write.mode("overwrite").parquet(temp_visit_occurrence)
         visit_occurrence = spark.read.parquet(temp_visit_occurrence)
 
@@ -207,6 +207,9 @@ def main(args):
         shutil.rmtree(os.path.join(cohort_folder, "temp"))
     else:
         cohort.write.mode("overwrite").parquet(cohort_folder)
+
+    if os.path.exists(temp_visit_occurrence):
+        shutil.rmtree(temp_visit_occurrence)
 
     spark.stop()
 
