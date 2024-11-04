@@ -354,6 +354,12 @@ def create_spark_args(parse: bool = True):
         choices=[e.value for e in AttType],
     )
     parser.add_argument(
+        "--inpatient_att_type",
+        dest="inpatient_att_type",
+        action="store",
+        choices=[e.value for e in AttType],
+    )
+    parser.add_argument(
         "--exclude_demographic",
         dest="exclude_demographic",
         action="store_true",
