@@ -22,9 +22,9 @@ class PredictionType(Enum):
     REGRESSION = "regression"
 
 
-def get_visit_occurrence_temp_folder(args):
+def get_temp_folder(args, table_name):
     cleaned_cohort_name = re.sub(r'[^A-Za-z0-9]', '_', args.cohort_name)
-    return os.path.join(args.output_folder, f"{cleaned_cohort_name}_visit_occurrence")
+    return os.path.join(args.output_folder, f"{cleaned_cohort_name}_{table_name}")
 
 
 def create_feature_extraction_args():
@@ -68,23 +68,55 @@ def main(args):
         f"Extract Features for existing cohort {args.cohort_name}"
     ).getOrCreate()
 
-    cohort = spark.read. \
+    cohort_csv = spark.read. \
         option("header", "true"). \
         option("inferSchema", "true"). \
         csv(args.cohort_dir). \
         withColumnRenamed(args.person_id_column, "person_id"). \
         withColumnRenamed(args.index_date_column, "index_date"). \
         withColumnRenamed(args.label_column, "label"). \
-        withColumn("index_date", f.col("index_date").cast(t.TimestampType())) \
-        .repartition("person_id")
+        withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
 
     if PredictionType.REGRESSION:
-        cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
+        cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.FloatType()))
     else:
-        cohort = cohort.withColumn("label", f.col("label").cast(t.IntegerType()))
+        cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.IntegerType()))
 
     cohort_member_id_udf = f.row_number().over(Window.orderBy("person_id", "index_date"))
-    cohort = cohort.withColumn("cohort_member_id", cohort_member_id_udf)
+    cohort_csv = cohort_csv.withColumn("cohort_member_id", cohort_member_id_udf)
+
+    # Save cohort as parquet files
+    cohort_temp_folder = get_temp_folder(args, "cohort")
+    cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
+    cohort = spark.read.parquet(cohort_temp_folder)
+
+    # Save visit_occurrence as temp dataframe if bound_visit_end_date is set to True
+    # meaning the visit_end_date will set to be prediction_time if the prediction time occurs within that visit
+    visit_occurrence_temp_folder = get_temp_folder(args, "visit_occurrence")
+    visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+    if args.bound_visit_end_date:
+        # Bound the visit_end_date at the prediction_time
+        visit_occurrence = visit_occurrence.join(
+            cohort.select(f.col("person_id").alias("cohort_person_id"), "index_date"),
+            (f.col("cohort_person_id") == f.col("person_id")) &
+            (f.col("visit_start_date") <= cohort["index_date"]) &
+            (cohort["index_date"] <= f.col("visit_end_date")),
+            "left_outer"
+        ).withColumn(
+            "visit_end_date",
+            f.when(
+                f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
+                f.least(f.col("visit_end_date"), cohort["index_date"])
+            ).otherwise(f.col("visit_end_date"))
+        ).withColumn(
+            "visit_end_datetime",
+            f.when(
+                f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
+                f.least(f.col("visit_end_datetime"), cohort["index_date"])
+            ).otherwise(f.col("visit_end_datetime"))
+        ).drop("index_date", "cohort_person_id")
+        visit_occurrence.write.mode("overwrite").parquet(visit_occurrence_temp_folder)
+        visit_occurrence = spark.read.parquet(visit_occurrence_temp_folder)
 
     ehr_records = extract_ehr_records(
         spark,
@@ -114,31 +146,6 @@ def main(args):
         "race_concept_id",
         "gender_concept_id",
     )
-    temp_visit_occurrence = get_visit_occurrence_temp_folder(args)
-    visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
-    if args.bound_visit_end_date:
-        # Bound the visit_end_date at the prediction_time
-        visit_occurrence = visit_occurrence.join(
-            cohort.select(f.col("person_id").alias("cohort_person_id"), "index_date"),
-            (f.col("cohort_person_id") == f.col("person_id")) &
-            (f.col("visit_start_date") <= cohort["index_date"]) &
-            (cohort["index_date"] <= f.col("visit_end_date")),
-            "left_outer"
-        ).withColumn(
-            "visit_end_date",
-            f.when(
-                f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
-                f.least(f.col("visit_end_date"), cohort["index_date"])
-            ).otherwise(f.col("visit_end_date"))
-        ).withColumn(
-            "visit_end_datetime",
-            f.when(
-                f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
-                f.least(f.col("visit_end_datetime"), cohort["index_date"])
-            ).otherwise(f.col("visit_end_datetime"))
-        ).drop("index_date", "cohort_person_id")
-        visit_occurrence.write.mode("overwrite").parquet(temp_visit_occurrence)
-        visit_occurrence = spark.read.parquet(temp_visit_occurrence)
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
@@ -208,8 +215,11 @@ def main(args):
     else:
         cohort.write.mode("overwrite").parquet(cohort_folder)
 
-    if os.path.exists(temp_visit_occurrence):
-        shutil.rmtree(temp_visit_occurrence)
+    if os.path.exists(visit_occurrence_temp_folder):
+        shutil.rmtree(visit_occurrence_temp_folder)
+
+    if os.path.exists(cohort_temp_folder):
+        shutil.rmtree(cohort_temp_folder)
 
     spark.stop()
 
