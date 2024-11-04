@@ -191,12 +191,20 @@ def main(args):
         f.year("index_date") - f.col("year_of_birth")
     ).drop("year_of_birth")
 
-    cohort = ehr_records.join(
-        cohort,
-        (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
+    # Alias ehr_records and cohort to avoid column ambiguity
+    cohort = ehr_records.alias("ehr").join(
+        cohort.alias("cohort"),
+        (f.col("ehr.person_id") == f.col("cohort.person_id")) &
+        (f.col("ehr.cohort_member_id") == f.col("cohort.cohort_member_id")),
     ).select(
-        [ehr_records[_] for _ in ehr_records.schema.fieldNames()]
-        + [cohort["age"], cohort["race_concept_id"], cohort["gender_concept_id"], cohort["index_date"], cohort["label"]]
+        [f.col("ehr." + col) for col in ehr_records.columns] +
+        [
+            f.col("cohort.age"),
+            f.col("cohort.race_concept_id"),
+            f.col("cohort.gender_concept_id"),
+            f.col("cohort.index_date"),
+            f.col("cohort.label")
+        ]
     )
 
     cohort_folder = str(os.path.join(args.output_folder, args.cohort_name))
