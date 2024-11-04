@@ -664,7 +664,6 @@ def create_sequence_data_with_att(
         patient_demographic=None,
         death=None,
         att_type: AttType = AttType.CEHR_BERT,
-        inpatient_att_type: AttType = AttType.MIX,
         exclude_demographic: bool = True,
         use_age_group: bool = False,
         include_inpatient_hour_token: bool = False,
@@ -680,7 +679,6 @@ def create_sequence_data_with_att(
     :param patient_demographic:
     :param death:
     :param att_type:
-    :param inpatient_att_type:
     :param exclude_demographic:
     :param use_age_group:
     :param include_inpatient_hour_token:
@@ -697,7 +695,6 @@ def create_sequence_data_with_att(
             include_visit_type,
             exclude_visit_tokens,
             att_type,
-            inpatient_att_type,
             include_inpatient_hour_token,
         ),
         DeathEventDecorator(death, att_type),
