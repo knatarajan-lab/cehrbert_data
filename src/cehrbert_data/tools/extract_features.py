@@ -22,7 +22,7 @@ class PredictionType(Enum):
     REGRESSION = "regression"
 
 
-def get_visit_occurrence_temp_folder(args) :
+def get_visit_occurrence_temp_folder(args):
     cleaned_cohort_name = re.sub(r'[^A-Za-z0-9]', '_', args.cohort_name)
     return os.path.join(args.output_folder, f"{cleaned_cohort_name}_visit_occurrence")
 
@@ -75,7 +75,8 @@ def main(args):
         withColumnRenamed(args.person_id_column, "person_id"). \
         withColumnRenamed(args.index_date_column, "index_date"). \
         withColumnRenamed(args.label_column, "label"). \
-        withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
+        withColumn("index_date", f.col("index_date").cast(t.TimestampType())) \
+        .repartition("person_id")
 
     if PredictionType.REGRESSION:
         cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
