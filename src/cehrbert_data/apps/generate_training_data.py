@@ -41,6 +41,7 @@ def main(
         apply_age_filter: bool,
         include_death: bool,
         att_type: AttType,
+        inpatient_att_type: AttType,
         include_sequence_information_content: bool = False,
         exclude_demographic: bool = False,
         use_age_group: bool = False,
@@ -165,6 +166,7 @@ def main(
             patient_demographic=person if gpt_patient_sequence else None,
             death=death,
             att_type=att_type,
+            inpatient_att_type=inpatient_att_type,
             exclude_demographic=exclude_demographic,
             use_age_group=use_age_group,
             include_inpatient_hour_token=include_inpatient_hour_token,
@@ -331,6 +333,12 @@ if __name__ == "__main__":
         action="store",
         choices=[e.value for e in AttType],
     )
+    parser.add_argument(
+        "--inpatient_att_type",
+        dest="inpatient_att_type",
+        action="store",
+        choices=[e.value for e in AttType],
+    )
 
     ARGS = parser.parse_args()
 
@@ -352,6 +360,7 @@ if __name__ == "__main__":
         ARGS.apply_age_filter,
         ARGS.include_death,
         AttType(ARGS.att_type),
+        AttType(ARGS.inpatient_att_type),
         exclude_demographic=ARGS.exclude_demographic,
         use_age_group=ARGS.use_age_group,
         with_drug_rollup=ARGS.with_drug_rollup,
