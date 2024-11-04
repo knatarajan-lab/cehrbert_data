@@ -163,7 +163,7 @@ def create_omop_person(
         "code"
     ).select(
         f.col("patient_id").alias("person_id"),
-        f.col("concept_id").alias("gender_concept_id"),
+        f.col("concept_id").cast(t.IntegerType()).alias("gender_concept_id"),
         f.col("code").alias("gender_source_value"),
     )
     ethnicity = convert_code_to_omop_concept(
@@ -172,7 +172,7 @@ def create_omop_person(
         "code"
     ).select(
         f.col("patient_id").alias("person_id"),
-        f.col("concept_id").alias("ethnicity_concept_id"),
+        f.col("concept_id").cast(t.IntegerType()).alias("ethnicity_concept_id"),
         f.col("code").alias("ethnicity_source_value"),
     )
     race = convert_code_to_omop_concept(
@@ -181,7 +181,7 @@ def create_omop_person(
         "code"
     ).select(
         f.col("patient_id").alias("person_id"),
-        f.col("concept_id").alias("race_concept_id"),
+        f.col("concept_id").cast(t.IntegerType()).alias("race_concept_id"),
         f.col("code").alias("race_source_value"),
     )
     return birth_datetime.join(
