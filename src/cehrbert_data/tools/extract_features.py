@@ -87,7 +87,7 @@ def main(args):
 
     # Save cohort as parquet files
     cohort_temp_folder = get_temp_folder(args, "cohort")
-    cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
+    cohort_csv.repartition("person_id", "index_date").write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
 
     # Save visit_occurrence as temp dataframe if bound_visit_end_date is set to True
@@ -114,7 +114,11 @@ def main(args):
                 f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
                 f.least(f.col("visit_end_datetime"), cohort["index_date"]).cast(t.TimestampType())
             ).otherwise(f.col("visit_end_datetime"))
-        ).drop("index_date", "cohort_person_id")
+        ).drop(
+            "index_date", "cohort_person_id"
+        ).repartition(
+            "person_id", "visit_start_date"
+        )
         visit_occurrence.write.mode("overwrite").parquet(visit_occurrence_temp_folder)
         visit_occurrence = spark.read.parquet(visit_occurrence_temp_folder)
 
@@ -134,6 +138,10 @@ def main(args):
         ehr_records,
         "person_id"
     ).where(ehr_records["date"] <= cohort["index_date"]).drop("index_date")
+
+    ehr_records_temp_folder = get_temp_folder(args, "ehr_records")
+    ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
+    ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -228,6 +236,9 @@ def main(args):
 
     if os.path.exists(cohort_temp_folder):
         shutil.rmtree(cohort_temp_folder)
+
+    if os.path.exists(ehr_records_temp_folder):
+        shutil.rmtree(ehr_records_temp_folder)
 
     spark.stop()
 
