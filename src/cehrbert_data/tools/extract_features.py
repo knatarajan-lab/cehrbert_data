@@ -117,7 +117,7 @@ def main(args):
     if args.bound_visit_end_date:
         visit_occurrence_bound = ehr_records.withColumn(
             "rn",
-            f.row_number().over(Window.orderBy("person_id", "index_date").orderBy(f.desc("datetime")))
+            f.row_number().over(Window.partitionBy("person_id", "index_date").orderBy(f.desc("datetime")))
         ).where(
             f.col("rn") == 1
         ).select(
