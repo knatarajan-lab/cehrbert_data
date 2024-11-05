@@ -16,8 +16,8 @@ class PySparkAbstract(unittest.TestCase, ABC):
         os.environ["SPARK_WORKER_INSTANCES"] = "1"
         os.environ["SPARK_WORKER_CORES"] = "4"
         os.environ["SPARK_EXECUTOR_CORES"] = "2"
-        os.environ["SPARK_DRIVER_MEMORY"] = "1g"
-        os.environ["SPARK_EXECUTOR_MEMORY"] = "1g"
+        os.environ["SPARK_DRIVER_MEMORY"] = "2g"
+        os.environ["SPARK_EXECUTOR_MEMORY"] = "2g"
 
     def setUp(self):
         from pyspark.sql import SparkSession
