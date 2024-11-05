@@ -572,44 +572,50 @@ class NestedCohortBuilder:
         )
 
         # Duplicate the records for cohorts that allow multiple entries
-        ehr_records = ehr_records.join(cohort, "person_id").select(
-            [ehr_records[field_name] for field_name in ehr_records.schema.fieldNames()] + ["cohort_member_id"]
-        )
+        ehr_records = ehr_records.alias("ehr").join(
+            cohort.alias("cohort"), F.col("ehr.person_id") == F.col("cohort.person_id")
+        ).select(
+            [F.col("ehr." + col) for col in ehr_records.columns] + [F.col("cohort.cohort_member_id")]
+        ).selectExpr("*")
 
         # Only allow the data records that occurred between the index date and the prediction window
         if self._is_population_estimation:
             if self._is_prediction_window_unbounded:
-                record_window_filter = ehr_records["date"] <= F.current_date()
+                record_window_filter = F.col("ehr.date") <= F.current_date()
             else:
-                record_window_filter = ehr_records["date"] <= F.date_add(cohort["index_date"], self._prediction_window)
+                record_window_filter = F.col("ehr.date") <= F.date_add(
+                    F.col("cohort.index_date"), self._prediction_window
+                )
         else:
             # For patient level prediction, we remove all records post index date
             if self._is_observation_post_index:
-                record_window_filter = ehr_records["date"].between(
-                    cohort["index_date"],
-                    F.date_add(cohort["index_date"], self._observation_window),
+                record_window_filter = F.col("ehr.date").between(
+                    F.col("cohort.index_date"),
+                    F.date_add(F.col("cohort.index_date"), self._observation_window),
                 )
             else:
                 if self._is_observation_window_unbounded:
-                    record_window_filter = ehr_records["date"] <= F.date_sub(
-                        cohort["index_date"], self._hold_off_window
+                    record_window_filter = F.col("ehr.date") <= F.date_sub(
+                        F.col("cohort.index_date"), self._hold_off_window
                     )
                 else:
-                    record_window_filter = ehr_records["date"].between(
+                    record_window_filter = F.col("ehr.date").between(
                         F.date_sub(
-                            cohort["index_date"],
+                            F.col("cohort.index_date"),
                             self._observation_window + self._hold_off_window,
                         ),
-                        F.date_sub(cohort["index_date"], self._hold_off_window),
+                        F.date_sub(F.col("cohort.index_date"), self._hold_off_window),
                     )
 
-        cohort_ehr_records = (
-            ehr_records.join(
-                cohort,
-                (ehr_records.person_id == cohort.person_id) & (ehr_records.cohort_member_id == cohort.cohort_member_id),
-            )
-            .where(record_window_filter)
-            .select([ehr_records[field_name] for field_name in ehr_records.schema.fieldNames()])
+        # Somehow the dataframe join does not work without using the alias
+        cohort_ehr_records = ehr_records.alias("ehr").join(
+            cohort.alias("cohort"),
+            (F.col("ehr.person_id") == F.col("cohort.person_id")) &
+            (F.col("ehr.cohort_member_id") == F.col("cohort.cohort_member_id")),
+        ).where(
+            record_window_filter
+        ).select(
+            [F.col("ehr." + field_name) for field_name in ehr_records.schema.fieldNames()]
         )
 
         if self._is_hierarchical_bert:
