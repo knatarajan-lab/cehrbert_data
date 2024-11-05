@@ -106,13 +106,13 @@ def main(args):
             "visit_end_date",
             f.when(
                 f.col("visit_end_date").isNotNull() & f.col("index_date").isNotNull(),
-                f.least(f.col("visit_end_date"), cohort["index_date"])
+                f.least(f.col("visit_end_date"), cohort["index_date"]).cast(t.DateType())
             ).otherwise(f.col("visit_end_date"))
         ).withColumn(
             "visit_end_datetime",
             f.when(
                 f.col("visit_end_datetime").isNotNull() & f.col("index_date").isNotNull(),
-                f.least(f.col("visit_end_datetime"), cohort["index_date"])
+                f.least(f.col("visit_end_datetime"), cohort["index_date"]).cast(t.TimestampType())
             ).otherwise(f.col("visit_end_datetime"))
         ).drop("index_date", "cohort_person_id")
         visit_occurrence.write.mode("overwrite").parquet(visit_occurrence_temp_folder)
