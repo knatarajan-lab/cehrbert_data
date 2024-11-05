@@ -87,7 +87,7 @@ def main(args):
 
     # Save cohort as parquet files
     cohort_temp_folder = get_temp_folder(args, "cohort")
-    cohort_csv.repartition("person_id", "index_date").write.mode("overwrite").parquet(cohort_temp_folder)
+    cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
 
     # Save visit_occurrence as temp dataframe if bound_visit_end_date is set to True
@@ -116,8 +116,6 @@ def main(args):
             ).otherwise(f.col("visit_end_datetime"))
         ).drop(
             "index_date", "cohort_person_id"
-        ).repartition(
-            "person_id", "visit_start_date"
         )
         visit_occurrence.write.mode("overwrite").parquet(visit_occurrence_temp_folder)
         visit_occurrence = spark.read.parquet(visit_occurrence_temp_folder)
