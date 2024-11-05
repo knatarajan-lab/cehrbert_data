@@ -189,7 +189,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
             if patient_event is None:
                 patient_event = filtered_domain_table
             else:
-                patient_event = patient_event.union(filtered_domain_table)
+                patient_event = patient_event.unionByName(filtered_domain_table)
 
     return patient_event
 
@@ -744,6 +744,7 @@ def create_sequence_data_with_att(
         "concept_order",
         "priority",
         "unit",
+        "event_group_id",
     ]
     output_columns = [
         "cohort_member_id",
@@ -765,6 +766,7 @@ def create_sequence_data_with_att(
         "concept_orders",
         "record_ranks",
         "units",
+        "event_group_ids",
     ]
 
     patient_grouped_events = (
@@ -795,6 +797,7 @@ def create_sequence_data_with_att(
         .withColumn("mlm_skip_values", F.col("data_for_sorting.mlm_skip_value"))
         .withColumn("visit_concept_ids", F.col("data_for_sorting.visit_concept_id"))
         .withColumn("units", F.col("data_for_sorting.unit"))
+        .withColumn("event_group_ids", F.col("data_for_sorting.event_group_id"))
     )
 
     return patient_grouped_events.select(output_columns)
@@ -881,7 +884,7 @@ def extract_ehr_records(
         )
         if patient_ehr_records:
             # Union all measurement records together with other domain records
-            patient_ehr_records = patient_ehr_records.union(processed_measurement)
+            patient_ehr_records = patient_ehr_records.unionByName(processed_measurement)
         else:
             patient_ehr_records = processed_measurement
 
@@ -1435,9 +1438,9 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            c.concept_code AS unit, 
+            CAST(NULL AS STRING) AS event_group_id,
             m.value_as_number AS concept_value,
-            CAST(NULL AS STRING) AS event_group_id
+            c.concept_code AS unit
         FROM measurement AS m
         JOIN measurement_unit_stats AS s
             ON s.measurement_concept_id = m.measurement_concept_id AND s.unit_concept_id = m.unit_concept_id
@@ -1461,9 +1464,9 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
-            'N/A' AS unit,
+            CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
             0.0 AS concept_value,
-            CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id
+            'N/A' AS unit,
         FROM measurement AS m
         WHERE EXISTS (
             SELECT
