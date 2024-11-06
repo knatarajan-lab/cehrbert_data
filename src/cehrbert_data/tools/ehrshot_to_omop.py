@@ -418,7 +418,7 @@ def convert_code_to_omop_concept(
     ).select(output_columns)
 
 
-def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
+def generate_visit_id(data: DataFrame) -> DataFrame:
     """
     Generates unique `visit_id`s for each visit based on time intervals between events per patient.
 
@@ -465,36 +465,29 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
         f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
     )
 
-    # Try linking the existing visits to the domain records
-    domain_records = domain_records.join(
-        real_visits.select("patient_id", "visit_id", "visit_start_date", "visit_end_date"),
-        (domain_records.patient_id == real_visits.patient_id) &
-        (domain_records.start.cast(t.DateType()).between(real_visits.visit_start_date, real_visits.visit_end_date)),
+    # Join the DataFrames with aliasing
+    domain_records = domain_records.alias("domain").join(
+        real_visits.alias("visit"),
+        (f.col("domain.patient_id") == f.col("visit.patient_id")) &
+        (f.col("domain.start").cast(t.DateType()).between(f.col("visit.visit_start_date"),
+                                                          f.col("visit.visit_end_date"))),
         "left_outer"
     ).withColumn(
         "ranking",
-        f.row_number().over(Window.partitionBy("record_id").orderBy(
-            f.col("visit_start_date").desc()
-        ))
+        f.row_number().over(Window.partitionBy("domain.record_id").orderBy(f.col("visit.visit_start_date").desc()))
     ).where(
         f.col("ranking") == 1
-    ).withColumn(
-        "visit_id",
-        f.coalesce(real_visits["visit_id"], domain_records["visit_id"])
-    ).drop(
-        "ranking",
-        real_visits.visit_start_date,
-        real_visits.visit_end_date,
-        real_visits.visit_id
+    ).select(
+        [f.col("domain." + _).alias(_) for _ in domain_records.schema.fieldNames() if _ != "visit_id"] +
+        [f.coalesce(f.col("visit.visit_id"), f.col("domain.visit_id")).alias("visit_id")]
     )
 
     max_visit_id = real_visits.select(f.max("visit_id")).collect()[0][0]
     orphan_records = domain_records.where(
-        domain_records["visit_id"].isNull()
+        f.col("visit_id").isNull()
     ).withColumn(
         "visit_id",
-        f.row_number().over(Window.partitionBy(
-            f.col("patient_id"), f.col("start").cast(t.DateType()))
+        f.row_number().over(Window.partitionBy(f.col("patient_id")).orderBy(f.col("start").cast(t.DateType()))
         ) + f.lit(max_visit_id)
     )
 
@@ -502,15 +495,16 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
     domain_records = domain_records.join(
         orphan_records.select(
             "record_id",
-            "visit_id"
+            f.col("visit_id").alias("new_visit_id")
         ),
         "record_id",
         "left_outer"
     ).withColumn(
         "visit_id",
-        f.coalesce(orphan_records["visit_id"], domain_records["visit_id"])
-    ).drop("record_id")
+        f.coalesce(f.col("new_visit_id"), domain_records["visit_id"])
+    ).drop("record_id", "new_visit_id")
 
+    # Generate the artificial visits
     artificial_visits = orphan_records.groupBy("visit_id", "patient_id").agg(
         f.min("start").alias("start"),
         f.min("end").alias("end")
@@ -527,6 +521,9 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
         "omop_table",
         f.lit("visit_occurrence")
     ).drop("record_id")
+
+    # Drop visit_start_date and visit_end_date
+    real_visits = real_visits.drop("visit_start_date", "visit_end_date")
 
     # Validate the uniqueness of visit_id
     artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1))
@@ -592,7 +589,7 @@ def main(args):
     if args.refresh_ehrshot or not os.path.exists(ehr_shot_path):
         ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
             args.ehr_shot_file
-        )
+        ).drop("_c0")
         # Add visit_id based on the time intervals between neighboring events
         ehr_shot_data = generate_visit_id(
             ehr_shot_data
