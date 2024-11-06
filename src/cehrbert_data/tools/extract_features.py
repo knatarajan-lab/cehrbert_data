@@ -94,7 +94,7 @@ def main(args):
         spark,
         input_folder=args.input_folder,
         domain_table_list=args.ehr_table_list,
-        include_visit_type=args.include_visit_type,
+        include_visit_type=False,
         with_diagnosis_rollup=args.is_roll_up_concept,
         with_drug_rollup=args.is_drug_roll_up_concept,
         include_concept_list=args.include_concept_list,
@@ -148,6 +148,24 @@ def main(args):
             f.least(f.col("visit_end_datetime"), f.col("index_date"))
         )
         visit_occurrence.cache()
+
+    ehr_records = ehr_records.alias("ehr").join(
+        visit_occurrence.alias("visit"),
+        f.col("ehr.visit_occurrence_id") == f.col("visit.visit_occurrence_id")
+    ).select(
+        f.col("ehr.person_id"),
+        f.col("ehr.cohort_member_id"),
+        f.col("ehr.standard_concept_id"),
+        f.col("ehr.date"),
+        f.col("ehr.datetime"),
+        f.col("ehr.visit_occurrence_id"),
+        f.col("ehr.domain"),
+        f.col("ehr.unit"),
+        f.col("ehr.concept_value"),
+        f.col("ehr.event_group_id"),
+        f.col("ehr.age"),
+        f.col("visit.visit_concept_id"),
+    )
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
