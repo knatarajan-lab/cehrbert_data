@@ -108,7 +108,7 @@ def main(args):
     ).where(ehr_records["date"] <= cohort["index_date"])
 
     ehr_records_temp_folder = get_temp_folder(args, "ehr_records")
-    ehr_records.repartition("person_id", "visit_occurrence_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
+    ehr_records.repartition("person_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
     ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
@@ -124,6 +124,7 @@ def main(args):
             "visit_occurrence_id",
             "index_date",
         )
+        visit_occurrence_bound = f.broadcast(visit_occurrence_bound)
         # Bound the visit_end_date and visit_end_datetime
         visit_occurrence = visit_occurrence.join(
             visit_occurrence_bound,
@@ -145,10 +146,8 @@ def main(args):
         ).withColumn(
             "visit_end_datetime",
             f.least(f.col("visit_end_datetime"), f.col("index_date"))
-        ).repartition(
-            "person_id", "visit_occurrence_id"
         )
-
+        visit_occurrence.cache()
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
