@@ -167,6 +167,8 @@ def main(args):
         f.col("visit.visit_concept_id"),
     )
 
+    ehr_records.cache()
+
     birthdate_udf = f.coalesce(
         "birth_datetime",
         f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
