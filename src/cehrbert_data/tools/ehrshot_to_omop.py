@@ -445,54 +445,97 @@ def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
         The input DataFrame with an additional `visit_id` column, which is a unique integer identifier
         for each visit, and each `patient_id`'s events are grouped according to visit.
     """
-    order_window = Window.partitionBy("patient_id").orderBy(f.col("start"))
 
-    data = data.repartition(16).withColumn(
-        "patient_event_order", f.row_number().over(order_window)
-    ).withColumn(
-        "time", f.coalesce(f.col("end"), f.col("start"))
-    ).withColumn(
-        "prev_time", f.coalesce(f.lag(f.col("time")).over(order_window), f.col("time"))
-    ).withColumn(
-        "hour_diff", (f.unix_timestamp("start") - f.unix_timestamp("prev_time")) / 3600
-    ).withColumn(
-        "is_gap", (f.col("hour_diff") > time_interval).cast(t.IntegerType())
-    ).drop(
-        "time", "prev_time", "hour_diff"
-    )
-
-    cumulative_window = Window.partitionBy("patient_id").orderBy("patient_event_order").rowsBetween(
-        Window.unboundedPreceding,
-        Window.currentRow
-    )
-
-    data = data.withColumn(
-        "visit_order",
-        f.sum("is_gap").over(cumulative_window)
-    ).drop(
-        "is_gap"
-    )
-
-    # We only allow the generated visit_ids associated with the visit_occurrence table
-    visit = data.where(
+    data = data.repartition(16)
+    real_visits = data.where(
         f.col("omop_table") == "visit_occurrence"
-    ).select("patient_id", "visit_order").distinct().withColumn(
-        "new_visit_id",
-        f.abs(
-            f.hash(f.concat(f.col("patient_id").cast("string"), f.col("visit_order").cast("string")))
-        ).cast("bigint")
+    ).withColumn(
+        "visit_start_date",
+        f.col("start").cast(t.DateType())
+    ).withColumn(
+        "visit_end_date",
+        f.coalesce(f.col("end").cast(t.DateType()), f.col("visit_start_date"))
     )
+
+    # Getting the records that do not have a visit_id
+    domain_records = data.where(
+        f.col("omop_table") != "visit_occurrence"
+    ).withColumn(
+        "record_id",
+        f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
+    )
+
+    # Try linking the existing visits to the domain records
+    domain_records = domain_records.join(
+        real_visits.select("patient_id", "visit_id", "visit_start_date", "visit_end_date"),
+        (domain_records.patient_id == real_visits.patient_id) &
+        (domain_records.start.cast(t.DateType()).between(real_visits.visit_start_date, real_visits.visit_end_date)),
+        "left_outer"
+    ).withColumn(
+        "ranking",
+        f.row_number().over(Window.partitionBy("record_id").orderBy(
+            f.col("visit_start_date").desc()
+        ))
+    ).where(
+        f.col("ranking") == 1
+    ).withColumn(
+        "visit_id",
+        f.coalesce(real_visits["visit_id"], domain_records["visit_id"])
+    ).drop(
+        "ranking",
+        real_visits.visit_start_date,
+        real_visits.visit_end_date,
+        real_visits.visit_id
+    )
+
+    max_visit_id = real_visits.select(f.max("visit_id")).collect()[0][0]
+    orphan_records = domain_records.where(
+        domain_records["visit_id"].isNull()
+    ).withColumn(
+        "visit_id",
+        f.row_number().over(Window.partitionBy(
+            f.col("patient_id"), f.col("start").cast(t.DateType()))
+        ) + f.lit(max_visit_id)
+    )
+
+    # Link the artificial visit_ids back to the domain_records
+    domain_records = domain_records.join(
+        orphan_records.select(
+            "record_id",
+            "visit_id"
+        ),
+        "record_id",
+        "left_outer"
+    ).withColumn(
+        "visit_id",
+        f.coalesce(orphan_records["visit_id"], domain_records["visit_id"])
+    ).drop("record_id")
+
+    artificial_visits = orphan_records.groupBy("visit_id", "patient_id").agg(
+        f.min("start").alias("start"),
+        f.min("end").alias("end")
+    ).withColumn(
+        "code",
+        f.lit(0)
+    ).withColumn(
+        "value",
+        f.lit(None).cast(t.StringType())
+    ).withColumn(
+        "unit",
+        f.lit(None).cast(t.StringType())
+    ).withColumn(
+        "omop_table",
+        f.lit("visit_occurrence")
+    ).drop("record_id")
 
     # Validate the uniqueness of visit_id
-    visit.groupby("new_visit_id").count().select(f.assert_true(f.col("count") == 1))
+    artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1))
     # Join the generated visit_id back to data
-    return data.join(
-        visit,
-        on=["patient_id", "visit_order"],
-        how="left_outer"
-    ).withColumn(
-        "visit_id", f.coalesce(f.col("new_visit_id"), f.col("visit_id"))
-    ).drop("visit_order", "patient_event_order", "new_visit_id")
+    return domain_records.unionByName(
+        real_visits
+    ).unionByName(
+        artificial_visits
+    )
 
 
 def drop_duplicate_visits(data: DataFrame) -> DataFrame:
