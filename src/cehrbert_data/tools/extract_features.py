@@ -108,10 +108,9 @@ def main(args):
     ).where(ehr_records["date"] <= cohort["index_date"])
 
     ehr_records_temp_folder = get_temp_folder(args, "ehr_records")
-    ehr_records.repartition("person_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
+    ehr_records.repartition("person_id", "visit_occurrence_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
     ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
-    visit_occurrence_temp = get_temp_folder(args, "visit_occurrence")
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
@@ -146,9 +145,9 @@ def main(args):
         ).withColumn(
             "visit_end_datetime",
             f.least(f.col("visit_end_datetime"), f.col("index_date"))
+        ).repartition(
+            "person_id", "visit_occurrence_id"
         )
-        visit_occurrence.repartition("person_id").write.mode("overwrite").parquet(visit_occurrence_temp)
-        visit_occurrence = spark.read.parquet(visit_occurrence_temp)
 
 
     birthdate_udf = f.coalesce(
@@ -244,9 +243,6 @@ def main(args):
 
     if os.path.exists(ehr_records_temp_folder):
         shutil.rmtree(ehr_records_temp_folder)
-
-    if os.path.exists(visit_occurrence_temp):
-        shutil.rmtree(visit_occurrence_temp)
 
     spark.stop()
 
