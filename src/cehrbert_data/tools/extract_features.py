@@ -112,45 +112,56 @@ def main(args):
     ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+    cohort_visit_occurrence = visit_occurrence.join(
+        cohort.select("person_id").distinct(),
+        "person_id"
+    ).withColumn(
+        "visit_end_date",
+        f.coalesce(f.col("visit_end_date"), f.col("visit_start_date"))
+    ).withColumn(
+        "visit_end_datetime",
+        f.coalesce(
+            f.col("visit_end_datetime"),
+            f.col("visit_end_date").cast(t.TimestampType()),
+            f.col("visit_start_datetime")
+        )
+    )
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
-        visit_occurrence_bound = ehr_records.withColumn(
-            "rn",
-            f.row_number().over(Window.partitionBy("person_id", "index_date").orderBy(f.desc("datetime")))
+        visit_index_date = cohort_visit_occurrence.alias("visit").join(
+            cohort.alias("cohort"),
+            "person_id"
         ).where(
-            f.col("rn") == 1
+            f.col("cohort.index_date").between(f.col("visit.visit_start_date"), f.col("visit.visit_end_date"))
         ).select(
-            "visit_occurrence_id",
-            "index_date",
+            f.col("visit.visit_occurrence_id"),
+            f.col("cohort.index_date")
         )
-        visit_occurrence_bound = f.broadcast(visit_occurrence_bound)
+
+        # Aggregate with count_distinct and rename it as "count"
+        visit_index_date_agg = visit_index_date.groupBy("visit_occurrence_id").agg(
+            f.countDistinct("index_date").alias("count")
+        )
+
+        # Run assertion
+        visit_index_date_agg.select(f.assert_true(f.col("count") == 1)).collect()
+
         # Bound the visit_end_date and visit_end_datetime
-        visit_occurrence = visit_occurrence.join(
-            visit_occurrence_bound,
+        cohort_visit_occurrence = cohort_visit_occurrence.join(
+            visit_index_date,
             "visit_occurrence_id",
             "left_outer",
         ).withColumn(
             "visit_end_date",
-            f.coalesce(f.col("visit_end_date"), f.col("visit_start_date"))
+            f.coalesce(f.col("index_date").cast(t.DateType()), f.col("visit_end_date"))
         ).withColumn(
             "visit_end_datetime",
-            f.coalesce(
-                f.col("visit_end_datetime"),
-                f.col("visit_end_date").cast(t.TimestampType()),
-                f.col("visit_start_datetime")
-            )
-        ).withColumn(
-            "visit_end_date",
-            f.least(f.col("visit_end_date"), f.col("index_date").cast(t.DateType()))
-        ).withColumn(
-            "visit_end_datetime",
-            f.least(f.col("visit_end_datetime"), f.col("index_date"))
+            f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
         )
-        visit_occurrence.cache()
 
     ehr_records = ehr_records.alias("ehr").join(
-        visit_occurrence.alias("visit"),
+        cohort_visit_occurrence.alias("visit"),
         f.col("ehr.visit_occurrence_id") == f.col("visit.visit_occurrence_id")
     ).select(
         f.col("ehr.person_id"),
@@ -167,8 +178,6 @@ def main(args):
         f.col("visit.visit_concept_id"),
     )
 
-    ehr_records.cache()
-
     birthdate_udf = f.coalesce(
         "birth_datetime",
         f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
@@ -183,7 +192,7 @@ def main(args):
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
-        visit_occurrence
+        cohort_visit_occurrence
         .join(patient_demographic, "person_id")
         .withColumn("age", age_udf)
         .drop("birth_datetime")
