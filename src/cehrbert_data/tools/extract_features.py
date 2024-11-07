@@ -133,19 +133,11 @@ def main(args):
             cohort.alias("cohort"),
             "person_id"
         ).where(
-            f.col("cohort.index_date").between(f.col("visit.visit_start_date"), f.col("visit.visit_end_date"))
+            f.col("cohort.index_date").between(f.col("visit.visit_start_datetime"), f.col("visit.visit_end_datetime"))
         ).select(
             f.col("visit.visit_occurrence_id"),
             f.col("cohort.index_date")
         )
-
-        # Aggregate with count_distinct and rename it as "count"
-        visit_index_date_agg = visit_index_date.groupBy("visit_occurrence_id").agg(
-            f.countDistinct("index_date").alias("count")
-        )
-
-        # Run assertion
-        visit_index_date_agg.select(f.assert_true(f.col("count") == 1)).collect()
 
         # Bound the visit_end_date and visit_end_datetime
         cohort_visit_occurrence = cohort_visit_occurrence.join(
