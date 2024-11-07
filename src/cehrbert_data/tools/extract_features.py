@@ -129,6 +129,10 @@ def main(args):
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
+        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
+            "order", f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
+        )
+
         visit_index_date = cohort_visit_occurrence.alias("visit").join(
             cohort.alias("cohort"),
             "person_id"
@@ -150,7 +154,7 @@ def main(args):
         ).withColumn(
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
-        )
+        ).orderBy(f.col("order")).drop("order")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -170,7 +174,7 @@ def main(args):
         .join(patient_demographic, "person_id")
         .withColumn("age", age_udf)
         .drop("birth_datetime")
-    ).orderBy(f.rand())
+    )
 
     if args.is_new_patient_representation:
         ehr_records = create_sequence_data_with_att(
@@ -181,8 +185,8 @@ def main(args):
             patient_demographic=(
                 patient_demographic if args.gpt_patient_sequence else None
             ),
-            att_type=args.att_type,
-            inpatient_att_type=args.inpatient_att_type,
+            att_type=AttType(args.att_type),
+            inpatient_att_type=AttType(args.inpatient_att_type),
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group
         )
