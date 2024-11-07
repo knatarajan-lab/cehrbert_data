@@ -125,7 +125,7 @@ def main(args):
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
         )
-    ).repartition("visit_occurrence_id", "person_id")
+    )
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
@@ -170,7 +170,7 @@ def main(args):
         .join(patient_demographic, "person_id")
         .withColumn("age", age_udf)
         .drop("birth_datetime")
-    )
+    ).orderBy(f.rand())
 
     if args.is_new_patient_representation:
         ehr_records = create_sequence_data_with_att(
