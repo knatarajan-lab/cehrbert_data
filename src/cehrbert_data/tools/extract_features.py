@@ -125,7 +125,7 @@ def main(args):
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
         )
-    )
+    ).repartition("visit_occurrence_id", "person_id")
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
@@ -138,7 +138,7 @@ def main(args):
             f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
             f.col("cohort.index_date").alias("index_date"),
         )
-        num_partitions = cohort_visit_occurrence.rdd.getNumPartitions()
+
         # Bound the visit_end_date and visit_end_datetime
         cohort_visit_occurrence = cohort_visit_occurrence.join(
             visit_index_date,
@@ -150,7 +150,7 @@ def main(args):
         ).withColumn(
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
-        ).repartition(num_partitions, "visit_occurrence_id", "person_id")
+        )
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -181,8 +181,8 @@ def main(args):
             patient_demographic=(
                 patient_demographic if args.gpt_patient_sequence else None
             ),
-            att_type=AttType.DAY,
-            inpatient_att_type=AttType.DAY,
+            att_type=args.att_type,
+            inpatient_att_type=args.inpatient_att_type,
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group
         )
