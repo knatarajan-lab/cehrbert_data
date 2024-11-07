@@ -98,7 +98,7 @@ def get_schema() -> t.StructType:
         t.StructField("code", t.StringType(), True),
         t.StructField("value", t.StringType(), True),
         t.StructField("unit", t.StringType(), True),
-        t.StructField("visit_id", t.LongType(), True),  # Converted to IntegerType
+        t.StructField("visit_id", t.FloatType(), True),  # Converted to IntegerType
         t.StructField("omop_table", t.StringType(), True)
     ])
 
@@ -589,6 +589,9 @@ def main(args):
     if args.refresh_ehrshot or not os.path.exists(ehr_shot_path):
         ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
             args.ehr_shot_file
+        ).withColumn(
+            "visit_id",
+            f.col("visit_id").cast(t.LongType())
         ).drop("_c0")
         # Add visit_id based on the time intervals between neighboring events
         ehr_shot_data = generate_visit_id(
