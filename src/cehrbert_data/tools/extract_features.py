@@ -138,10 +138,10 @@ def main(args):
             f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
             f.col("cohort.index_date").alias("index_date"),
         )
-
+        num_partitions = cohort_visit_occurrence.rdd.getNumPartitions()
         # Bound the visit_end_date and visit_end_datetime
         cohort_visit_occurrence = cohort_visit_occurrence.join(
-            f.broadcast(visit_index_date),
+            visit_index_date,
             "visit_occurrence_id",
             "left_outer",
         ).withColumn(
@@ -150,7 +150,7 @@ def main(args):
         ).withColumn(
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
-        )
+        ).repartition(num_partitions, "visit_occurrence_id", "person_id")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -175,7 +175,7 @@ def main(args):
     if args.is_new_patient_representation:
         ehr_records = create_sequence_data_with_att(
             ehr_records.drop("index_date") if "index_date" in ehr_records.schema.fieldNames() else ehr_records,
-            visit_occurrence=f.broadcast(visit_occurrence_person),
+            visit_occurrence=visit_occurrence_person,
             include_visit_type=args.include_visit_type,
             exclude_visit_tokens=args.exclude_visit_tokens,
             patient_demographic=(
