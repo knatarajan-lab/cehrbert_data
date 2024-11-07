@@ -151,8 +151,6 @@ def main(args):
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
         )
-        cohort_visit_occurrence.cache()
-        cohort_visit_occurrence = f.broadcast(cohort_visit_occurrence)
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -177,7 +175,7 @@ def main(args):
     if args.is_new_patient_representation:
         ehr_records = create_sequence_data_with_att(
             ehr_records.drop("index_date") if "index_date" in ehr_records.schema.fieldNames() else ehr_records,
-            visit_occurrence=visit_occurrence_person,
+            visit_occurrence=f.broadcast(visit_occurrence_person),
             include_visit_type=args.include_visit_type,
             exclude_visit_tokens=args.exclude_visit_tokens,
             patient_demographic=(
