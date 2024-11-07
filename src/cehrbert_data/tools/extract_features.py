@@ -94,7 +94,7 @@ def main(args):
         spark,
         input_folder=args.input_folder,
         domain_table_list=args.ehr_table_list,
-        include_visit_type=False,
+        include_visit_type=args.include_visit_type,
         with_diagnosis_rollup=args.is_roll_up_concept,
         with_drug_rollup=args.is_drug_roll_up_concept,
         include_concept_list=args.include_concept_list,
@@ -135,8 +135,8 @@ def main(args):
         ).where(
             f.col("cohort.index_date").between(f.col("visit.visit_start_datetime"), f.col("visit.visit_end_datetime"))
         ).select(
-            f.col("visit.visit_occurrence_id"),
-            f.col("cohort.index_date")
+            f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
+            f.col("cohort.index_date").alias("index_date"),
         )
 
         # Bound the visit_end_date and visit_end_datetime
@@ -151,24 +151,8 @@ def main(args):
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
         )
-
-    ehr_records = ehr_records.alias("ehr").join(
-        cohort_visit_occurrence.alias("visit"),
-        f.col("ehr.visit_occurrence_id") == f.col("visit.visit_occurrence_id")
-    ).select(
-        f.col("ehr.person_id"),
-        f.col("ehr.cohort_member_id"),
-        f.col("ehr.standard_concept_id"),
-        f.col("ehr.date"),
-        f.col("ehr.datetime"),
-        f.col("ehr.visit_occurrence_id"),
-        f.col("ehr.domain"),
-        f.col("ehr.unit"),
-        f.col("ehr.concept_value"),
-        f.col("ehr.event_group_id"),
-        f.col("ehr.age"),
-        f.col("visit.visit_concept_id"),
-    )
+        cohort_visit_occurrence.cache()
+        cohort_visit_occurrence = f.broadcast(cohort_visit_occurrence)
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
