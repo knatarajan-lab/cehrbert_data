@@ -420,32 +420,40 @@ def convert_code_to_omop_concept(
 
 def generate_visit_id(data: DataFrame) -> DataFrame:
     """
-    Generates unique `visit_id`s for each visit based on time intervals between events per patient.
+     Generates unique `visit_id`s for each visit based on distinct patient event records.
 
-    This function identifies distinct visits within a patient's event history by analyzing time gaps
-    between consecutive events. Events with gaps exceeding the specified `time_interval` (in hours)
-    are considered separate visits. A unique integer `visit_id` is then assigned to each visit
-    using a hash of the patient ID and visit order.
+     This function identifies records associated with actual visits (`visit_occurrence` table) and assigns
+     `visit_id`s to those records. For other event records without a `visit_id`, it attempts to link them to
+     existing visits based on overlapping date ranges. If no matching visit is found, it generates new `visit_id`s
+     for these orphan records and creates artificial visits.
 
-    Parameters
-    ----------
-    data : DataFrame
-        A PySpark DataFrame containing at least the following columns:
-        - `patient_id`: Identifier for each patient.
-        - `start`: Start timestamp of the event.
-        - `end`: (Optional) End timestamp of the event.
+     Parameters
+     ----------
+     data : DataFrame
+         A PySpark DataFrame containing at least the following columns:
+         - `patient_id`: Identifier for each patient.
+         - `start`: Start timestamp of the event.
+         - `end`: (Optional) End timestamp of the event.
+         - `omop_table`: String specifying the type of event (e.g., "visit_occurrence" for real visits).
+         - `visit_id`: (Optional) Identifier for visits. May be missing in some records.
 
-    time_interval : int, optional, default=12
-        The maximum time gap in hours between consecutive events within the same visit. If the time
-        difference between two events exceeds this interval, a new visit is assigned.
+     Returns
+     -------
+     DataFrame
+         A DataFrame with a `visit_id` assigned to each event record, including both real visits and artificial visits.
+         The returned DataFrame includes both the original records and any generated artificial visit records,
+         with each record grouped according to the identified visit.
 
-    Returns
-    -------
-    DataFrame
-        The input DataFrame with an additional `visit_id` column, which is a unique integer identifier
-        for each visit, and each `patient_id`'s events are grouped according to visit.
-    """
-
+     Steps
+     -----
+     1. **Identify Real Visits**: Filters out records from `visit_occurrence` and sets start and end dates for each visit.
+     2. **Assign `visit_id`s to Other Records**: Attempts to link non-visit records (from other tables) to real visits
+        based on matching `patient_id` and date ranges.
+     3. **Handle Orphan Records**: For records without a matching visit, assigns new `visit_id`s by grouping
+        records by patient and start date.
+     4. **Create Artificial Visits**: Generates artificial visit records for orphan `visit_id`s.
+     5. **Merge and Validate**: Combines the original records with artificial visits and validates the uniqueness of each `visit_id`.
+     """
     data = data.repartition(16)
     real_visits = data.where(
         f.col("omop_table") == "visit_occurrence"
@@ -507,7 +515,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
     # Generate the artificial visits
     artificial_visits = orphan_records.groupBy("visit_id", "patient_id").agg(
         f.min("start").alias("start"),
-        f.min("end").alias("end")
+        f.max("end").alias("end")
     ).withColumn(
         "code",
         f.lit(0)
