@@ -487,7 +487,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         f.col("visit_id").isNull()
     ).withColumn(
         "visit_id",
-        f.row_number().over(Window.partitionBy(f.col("patient_id")).orderBy(f.col("start").cast(t.DateType()))
+        f.row_number().over(Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
         ) + f.lit(max_visit_id)
     )
 
@@ -526,7 +526,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
     real_visits = real_visits.drop("visit_start_date", "visit_end_date")
 
     # Validate the uniqueness of visit_id
-    artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1))
+    artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1)).collect()
     # Join the generated visit_id back to data
     return domain_records.unionByName(
         real_visits
