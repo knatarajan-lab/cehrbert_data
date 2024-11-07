@@ -141,7 +141,7 @@ def main(args):
 
         # Bound the visit_end_date and visit_end_datetime
         cohort_visit_occurrence = cohort_visit_occurrence.join(
-            visit_index_date,
+            f.broadcast(visit_index_date),
             "visit_occurrence_id",
             "left_outer",
         ).withColumn(
