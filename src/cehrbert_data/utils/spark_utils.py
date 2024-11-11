@@ -177,7 +177,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["datetime"],
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
-                F.lit(None).cast("string").alias("event_group_id"),
+                F.lit(NA).cast("string").alias("event_group_id"),
                 F.lit(0.0).alias("concept_value"),
                 F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
             ).distinct()
@@ -1436,7 +1436,7 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            CAST(NULL AS STRING) AS event_group_id,
+            'N/A' AS event_group_id,
             m.value_as_number AS concept_value,
             c.concept_code AS unit
         FROM measurement AS m
