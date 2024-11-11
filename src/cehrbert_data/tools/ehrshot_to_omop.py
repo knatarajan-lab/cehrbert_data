@@ -495,8 +495,10 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         f.col("visit_id").isNull()
     ).withColumn(
         "visit_id",
-        f.row_number().over(Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
+        f.dense_rank().over(Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
         ) + f.lit(max_visit_id)
+    ).where(
+        f.col("omop_table") != "person"
     )
 
     # Link the artificial visit_ids back to the domain_records
