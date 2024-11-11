@@ -1466,7 +1466,7 @@ def process_measurement(
             'categorical_measurement' AS domain,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
             0.0 AS concept_value,
-            'N/A' AS unit,
+            'N/A' AS unit
         FROM measurement AS m
         WHERE EXISTS (
             SELECT
