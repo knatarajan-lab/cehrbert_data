@@ -479,7 +479,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         (f.col("domain.visit_id") == f.col("in_visit.visit_id")),
         "left_outer"
     ).withColumn(
-        "visit_id",
+        "new_visit_id",
         f.coalesce(
             f.when(
                 f.col("domain.start").between(
@@ -493,7 +493,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         [
             f.col("domain." + field).alias(field)
             for field in domain_records.schema.fieldNames() if not field.endswith("visit_id")
-        ] + ["visit_id"]
+        ] + [f.col("new_visit_id").alias("visit_id")]
     )
 
     # Join the DataFrames with aliasing
