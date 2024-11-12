@@ -98,7 +98,7 @@ def get_schema() -> t.StructType:
         t.StructField("code", t.StringType(), True),
         t.StructField("value", t.StringType(), True),
         t.StructField("unit", t.StringType(), True),
-        t.StructField("visit_id", t.FloatType(), True),  # Converted to IntegerType
+        t.StructField("visit_id", t.StringType(), True),  # Converted to IntegerType
         t.StructField("omop_table", t.StringType(), True)
     ])
 
