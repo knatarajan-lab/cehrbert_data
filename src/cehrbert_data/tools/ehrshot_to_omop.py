@@ -525,28 +525,37 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         f.dense_rank().over(
             Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
         ).cast(t.LongType()) + f.col("max_visit_id").cast(t.LongType())
+    ).drop(
+        "visit_id"
     )
-    orphan_records.groupby("visit_id").agg(
+    orphan_records.groupby("new_visit_id").agg(
         f.countDistinct("patient_id").alias("pat_count")
     ).select(
         f.assert_true(f.col("pat_count") == 1)
     ).collect()
 
     # Link the artificial visit_ids back to the domain_records
-    domain_records = domain_records.join(
-        orphan_records.select(
-            "record_id",
-            "new_visit_id"
+    domain_records = domain_records.alias("domain").join(
+        orphan_records.alias("orphan").select(
+            f.col("orphan.record_id"),
+            f.col("orphan.new_visit_id"),
         ),
-        "record_id",
+        f.col("domain.record_id") == f.col("orphan.record_id"),
         "left_outer"
     ).withColumn(
-        "visit_id",
-        f.coalesce(f.col("new_visit_id"), domain_records["visit_id"])
-    ).drop("record_id", "new_visit_id")
+        "update_visit_id",
+        f.coalesce(f.col("orphan.new_visit_id"), f.col("domain.visit_id"))
+    ).select(
+        [
+            f.col("domain." + field).alias(field)
+            for field in domain_records.schema.fieldNames() if not field.endswith("visit_id")
+        ] + [f.col("update_visit_id").alias("visit_id")]
+    ).drop(
+        "record_id"
+    )
 
     # Generate the artificial visits
-    artificial_visits = orphan_records.groupBy("visit_id", "patient_id").agg(
+    artificial_visits = orphan_records.groupBy("new_visit_id", "patient_id").agg(
         f.min("start").alias("start"),
         f.max("end").alias("end")
     ).withColumn(
@@ -561,6 +570,8 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
     ).withColumn(
         "omop_table",
         f.lit("visit_occurrence")
+    ).withColumnRenamed(
+        "new_visit_id", "visit_id"
     ).drop("record_id")
 
     # Drop visit_start_date and visit_end_date
