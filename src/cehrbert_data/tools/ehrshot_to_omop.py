@@ -472,6 +472,10 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         "record_id",
         f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
     )
+
+    # This is important to have a deterministic behavior for generating record_id
+    domain_records.cache()
+
     # Invalidate visit_id if the record's time stamp falls outside the visit start/end
     domain_records = domain_records.alias("domain").join(
         real_visits.where("code == 'Visit/IP'").alias("in_visit"),
