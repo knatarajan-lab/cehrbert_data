@@ -472,6 +472,29 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         "record_id",
         f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
     )
+    # Invalidate visit_id if the record's time stamp falls outside the visit start/end
+    domain_records = domain_records.alias("domain").join(
+        real_visits.where("code == 'Visit/IP'").alias("in_visit"),
+        (f.col("domain.patient_id") == f.col("in_visit.patient_id")) &
+        (f.col("domain.visit_id") == f.col("in_visit.visit_id")),
+        "left_outer"
+    ).withColumn(
+        "visit_id",
+        f.coalesce(
+            f.when(
+                f.col("domain.start").between(
+                    f.date_sub(f.col("in_visit.start"), 1), f.date_add(f.col("in_visit.end"), 1)
+                ),
+                f.col("domain.visit_id")
+            ).otherwise(f.lit(None).cast(t.LongType())),
+            f.col("domain.visit_id")
+        )
+    ).select(
+        [
+            f.col("domain." + field).alias(field)
+            for field in domain_records.schema.fieldNames() if not field.endswith("visit_id")
+        ] + ["visit_id"]
+    )
 
     # Join the DataFrames with aliasing
     domain_records = domain_records.alias("domain").join(
@@ -496,7 +519,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
     ).withColumn(
         "visit_id",
         f.dense_rank().over(Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
-        ) + f.lit(max_visit_id)
+                            ) + f.lit(max_visit_id)
     ).where(
         f.col("omop_table") != "person"
     )
