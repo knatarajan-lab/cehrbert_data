@@ -526,6 +526,11 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
             Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
         ).cast(t.LongType()) + f.col("max_visit_id").cast(t.LongType())
     )
+    orphan_records.groupby("visit_id").agg(
+        f.countDistinct("patient_id").alias("pat_count")
+    ).select(
+        f.assert_true(f.col("pat_count") == 1)
+    ).collect()
 
     # Link the artificial visit_ids back to the domain_records
     domain_records = domain_records.join(
