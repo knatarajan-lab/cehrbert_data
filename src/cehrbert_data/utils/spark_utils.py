@@ -68,7 +68,7 @@ DOMAIN_KEY_FIELDS = {
             "measurement"
         )
     ],
-    "death_date": [("death_concept_id", "death_date", "death_datetime", "death")],
+    "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
         ("discharged_to_concept_id", "visit_end_date", "visit"),
