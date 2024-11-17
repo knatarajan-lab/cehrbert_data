@@ -68,7 +68,7 @@ DOMAIN_KEY_FIELDS = {
             "measurement"
         )
     ],
-    "death_date": [("death_concept_id", "death_date", "death_datetime", "death")],
+    "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
         ("discharged_to_concept_id", "visit_end_date", "visit"),
@@ -177,7 +177,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["datetime"],
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
-                F.lit(None).cast("string").alias("event_group_id"),
+                F.lit(NA).cast("string").alias("event_group_id"),
                 F.lit(0.0).alias("concept_value"),
                 F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
             ).distinct()
@@ -1438,7 +1438,7 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            CAST(NULL AS STRING) AS event_group_id,
+            'N/A' AS event_group_id,
             m.value_as_number AS concept_value,
             c.concept_code AS unit
         FROM measurement AS m
@@ -1466,7 +1466,7 @@ def process_measurement(
             'categorical_measurement' AS domain,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
             0.0 AS concept_value,
-            'N/A' AS unit,
+            'N/A' AS unit
         FROM measurement AS m
         WHERE EXISTS (
             SELECT

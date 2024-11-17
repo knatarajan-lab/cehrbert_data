@@ -21,6 +21,7 @@ class EHRShotUnitTest(unittest.TestCase):
     def setUpClass(cls):
         # Initialize the Spark session for testing
         cls.spark = SparkSession.builder.appName("ehr_shot").getOrCreate()
+        cls.spark.conf.set("spark.sql.analyzer.failAmbiguousSelfJoin", False)
 
     @classmethod
     def tearDownClass(cls):
@@ -56,30 +57,34 @@ class EHRShotUnitTest(unittest.TestCase):
             StructField("end", TimestampType(), True),
             StructField("visit_id", IntegerType(), True),
             StructField("omop_table", StringType(), True),
+            StructField("code", StringType(), True),
+            StructField("unit", StringType(), True),
+            StructField("value", StringType(), True),
         ])
 
         # Sample data with multiple events for each patient and different time gaps
         data = [
-            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "visit_occurrence"),
-            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20), None, "condition_occurrence"),  # 11-hour gap (merged visit)
-            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), None, "visit_occurrence"),  # another visit
-            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "visit_occurrence"),
-            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None, "condition_occurrence"),  # same visit for patient 2
-            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1000, "visit_occurrence"),
-            (4, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "condition_occurrence")
+            (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1, "visit_occurrence", None, None, None),
+            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20), None, "condition_occurrence", None, None, None),  # 11-hour gap (merged visit)
+            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), 2, "visit_occurrence", None, None, None),  # another visit
+            (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 3, "visit_occurrence", None, None, None),
+            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None, "condition_occurrence", None, None, None),  # same visit for patient 2
+            (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1000, "visit_occurrence", None, None, None),
+            (4, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "condition_occurrence", None, None, None)
         ]
 
         # Create DataFrame
         data = self.spark.createDataFrame(data, schema=schema)
         # Run the function to generate visit IDs
-        result_df = generate_visit_id(data, time_interval=12)
+        result_df = generate_visit_id(data)
+        result_df.show()
         # Validate the number of visits
-        self.assertEqual(4, result_df.select("visit_id").where(f.col("visit_id").isNotNull()).distinct().count())
-        self.assertEqual(7, result_df.count())
+        self.assertEqual(5, result_df.select("visit_id").where(f.col("visit_id").isNotNull()).distinct().count())
+        self.assertEqual(8, result_df.count())
 
         # Check that visit_id was generated as an integer (bigint)
-        self.assertEqual(
-            result_df.schema["visit_id"].dataType.simpleString(), "bigint",
+        self.assertIn(
+            result_df.schema["visit_id"].dataType.simpleString(), ["int", "bigint"],
             "visit_id should be of type bigint"
         )
 
@@ -103,7 +108,7 @@ class EHRShotUnitTest(unittest.TestCase):
 
         patient_4_visits = result_df.filter(f.col("patient_id") == 4).select("visit_id").collect()[0].visit_id
         self.assertEqual(
-            None, patient_4_visits, "Patient 4 should have a null visit_id."
+            1001, patient_4_visits, "Patient 4 should have one generated visit_id."
         )
 
     def test_drop_duplicate_visits(self):

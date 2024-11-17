@@ -43,7 +43,6 @@ class DeathEventDecorator(PatientEventDecorator):
         )
 
         last_ve_record.cache()
-        last_ve_record.show()
         # set(['cohort_member_id', 'person_id', 'standard_concept_id', 'date',
         #      'visit_occurrence_id', 'domain', 'concept_value', 'visit_rank_order',
         #      'visit_segment', 'priority', 'date_in_week', 'concept_value_mask',
@@ -59,7 +58,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("standard_concept_id", F.lit(DEATH_TOKEN))
             .withColumn("domain", F.lit("death"))
             .withColumn("visit_rank_order", F.lit(1) + F.col("visit_rank_order"))
-            .withColumn("priority", DEATH_TOKEN_PRIORITY)
+            .withColumn("priority", F.lit(DEATH_TOKEN_PRIORITY))
             .withColumn("event_group_id", F.lit(NA))
             .drop("max_visit_occurrence_id")
         )
@@ -67,7 +66,7 @@ class DeathEventDecorator(PatientEventDecorator):
         vs_records = (
             death_records
             .withColumn("standard_concept_id", F.lit(VS_TOKEN))
-            .withColumn("priority", VS_TOKEN_PRIORITY)
+            .withColumn("priority", F.lit(VS_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
         )
@@ -75,7 +74,7 @@ class DeathEventDecorator(PatientEventDecorator):
         ve_records = (
             death_records
             .withColumn("standard_concept_id", F.lit(VE_TOKEN))
-            .withColumn("priority", VE_TOKEN_PRIORITY)
+            .withColumn("priority", F.lit(VE_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
         )
