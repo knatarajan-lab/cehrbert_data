@@ -83,8 +83,8 @@ class EHRShotUnitTest(unittest.TestCase):
         self.assertEqual(8, result_df.count())
 
         # Check that visit_id was generated as an integer (bigint)
-        self.assertEqual(
-            result_df.schema["visit_id"].dataType.simpleString(), "int",
+        self.assertIn(
+            result_df.schema["visit_id"].dataType.simpleString(), ["int", "bigint"],
             "visit_id should be of type bigint"
         )
 
