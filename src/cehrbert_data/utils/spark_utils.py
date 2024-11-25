@@ -177,8 +177,9 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["datetime"],
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
-                F.lit(NA).cast("string").alias("event_group_id"),
-                F.lit(0.0).alias("concept_value"),
+                F.lit(None).cast("string").alias("event_group_id"),
+                F.lit(0.0).alias("number_as_value"),
+                F.lit(0).alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
             ).distinct()
 
@@ -716,7 +717,6 @@ def create_sequence_data_with_att(
             "concept_order",
             "priority",
             "datetime",
-            "event_group_id",
             "standard_concept_id",
         )
     )
@@ -737,14 +737,15 @@ def create_sequence_data_with_att(
         "age",
         "visit_rank_order",
         "concept_value_mask",
-        "concept_value",
+        "number_as_value",
+        "concept_as_value",
+        "is_numeric_type",
         "mlm_skip_value",
         "visit_concept_id",
         "visit_concept_order",
         "concept_order",
         "priority",
         "unit",
-        "event_group_id",
     ]
     output_columns = [
         "cohort_member_id",
@@ -758,7 +759,9 @@ def create_sequence_data_with_att(
         "num_of_visits",
         "num_of_concepts",
         "concept_value_masks",
-        "concept_values",
+        "number_as_values",
+        "concept_as_values",
+        "is_numeric_types",
         "mlm_skip_values",
         "priorities",
         "visit_concept_ids",
@@ -766,7 +769,6 @@ def create_sequence_data_with_att(
         "concept_orders",
         "record_ranks",
         "units",
-        "event_group_ids",
     ]
 
     patient_grouped_events = (
@@ -793,13 +795,13 @@ def create_sequence_data_with_att(
         .withColumn("concept_orders", F.col("data_for_sorting.concept_order"))
         .withColumn("priorities", F.col("data_for_sorting.priority"))
         .withColumn("concept_value_masks", F.col("data_for_sorting.concept_value_mask"))
-        .withColumn("concept_values", F.col("data_for_sorting.concept_value"))
+        .withColumn("number_as_values", F.col("data_for_sorting.number_as_value"))
+        .withColumn("concept_as_values", F.col("data_for_sorting.concept_as_value"))
+        .withColumn("is_numeric_types", F.col("data_for_sorting.is_numeric_type"))
         .withColumn("mlm_skip_values", F.col("data_for_sorting.mlm_skip_value"))
         .withColumn("visit_concept_ids", F.col("data_for_sorting.visit_concept_id"))
         .withColumn("units", F.col("data_for_sorting.unit"))
-        .withColumn("event_group_ids", F.col("data_for_sorting.event_group_id"))
     )
-
     return patient_grouped_events.select(output_columns)
 
 
@@ -872,7 +874,6 @@ def extract_ehr_records(
         qualified_concepts = preprocess_domain_table(spark, input_folder, QUALIFIED_CONCEPT_LIST_PATH).select(
             "standard_concept_id"
         )
-
         patient_ehr_records = patient_ehr_records.join(qualified_concepts, "standard_concept_id")
 
     # Process the measurement table if exists
@@ -914,7 +915,8 @@ def extract_ehr_records(
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
             patient_ehr_records["unit"],
-            patient_ehr_records["concept_value"],
+            patient_ehr_records["number_as_value"],
+            patient_ehr_records["concept_as_value"],
             patient_ehr_records["event_group_id"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
@@ -1068,7 +1070,7 @@ def create_hierarchical_sequence_data(
         F.coalesce(patient_events["standard_concept_id"], F.lit(UNKNOWN_CONCEPT)).alias("standard_concept_id"),
         F.coalesce(patient_events["date"], visit_occurrence["visit_start_date"]).alias("date"),
         F.coalesce(patient_events["domain"], F.lit("unknown")).alias("domain"),
-        F.coalesce(patient_events["concept_value"], F.lit(-1.0)).alias("concept_value"),
+        F.coalesce(patient_events["number_as_value"], F.lit(-1.0)).alias("number_as_value"),
     ]
 
     # Convert standard_concept_id to string type, this is needed for the tokenization
@@ -1125,7 +1127,7 @@ def create_hierarchical_sequence_data(
         .withColumn("visit_concept_order", F.lit(0))
         .withColumn("date", F.col("visit_start_date"))
         .withColumn("concept_value_mask", F.lit(0))
-        .withColumn("concept_value", F.lit(-1.0))
+        .withColumn("number_as_value", F.lit(-1.0))
         .withColumn("mlm_skip", F.lit(1))
         .withColumn("condition_mask", F.lit(0))
     )
@@ -1137,7 +1139,7 @@ def create_hierarchical_sequence_data(
         "date_in_week",
         "age",
         "concept_value_mask",
-        "concept_value",
+        "number_as_value",
         "mlm_skip",
         "condition_mask",
     ]
@@ -1438,8 +1440,9 @@ def process_measurement(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'measurement' AS domain,
-            'N/A' AS event_group_id,
-            m.value_as_number AS concept_value,
+            CAST(NULL AS STRING) AS event_group_id,
+            m.value_as_number AS number_as_value,
+            0 AS concept_as_value,
             c.concept_code AS unit
         FROM measurement AS m
         JOIN measurement_unit_stats AS s
@@ -1459,13 +1462,14 @@ def process_measurement(
         """
         SELECT
             m.person_id,
-            CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(COALESCE(value_as_concept_id, 0) AS STRING)) AS standard_concept_id,
+            measurement_concept_id AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
-            0.0 AS concept_value,
+            0.0 AS number_as_value,
+            COALESCE(value_as_concept_id, 0) AS concept_as_value,
             'N/A' AS unit
         FROM measurement AS m
         WHERE EXISTS (

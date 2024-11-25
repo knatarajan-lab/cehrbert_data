@@ -38,7 +38,7 @@ class AttEventDecorator(PatientEventDecorator):
             return patient_events
 
         # visits should the following columns (person_id,
-        # visit_concept_id, visit_start_date, visit_occurrence_id, domain, concept_value)
+        # visit_concept_id, visit_start_date, visit_occurrence_id, domain)
         cohort_member_person_pair = patient_events.select("person_id", "cohort_member_id").distinct()
         valid_visit_ids = patient_events.groupby(
             "cohort_member_id",
@@ -62,7 +62,9 @@ class AttEventDecorator(PatientEventDecorator):
                 "visit_concept_id",
                 "visit_occurrence_id",
                 F.lit("visit").alias("domain"),
-                F.lit(0.0).alias("concept_value"),
+                F.lit(0.0).alias("number_as_value"),
+                F.lit(0).alias("concept_as_value"),
+                F.lit(0).alias("is_numeric_type"),
                 F.lit(0).alias("concept_value_mask"),
                 F.lit(0).alias("mlm_skip_value"),
                 "age",
@@ -271,7 +273,9 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("visit_concept_order", F.col("visit_concept_order"))
                 .withColumn("priority", get_inpatient_att_token_priority())
                 .withColumn("concept_value_mask", F.lit(0))
-                .withColumn("concept_value", F.lit(0.0))
+                .withColumn("number_as_value", F.lit(0.0))
+                .withColumn("concept_as_value", F.lit(0))
+                .withColumn("is_numeric_type", F.lit(0))
                 .withColumn("unit", F.lit(NA))
                 .withColumn("event_group_id", F.lit(NA))
                 .drop("prev_date", "time_delta", "is_span_boundary")
@@ -298,7 +302,9 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("visit_concept_order", F.col("visit_concept_order"))
                 .withColumn("priority", get_inpatient_att_token_priority())
                 .withColumn("concept_value_mask", F.lit(0))
-                .withColumn("concept_value", F.lit(0.0))
+                .withColumn("number_as_value", F.lit(0.0))
+                .withColumn("concept_as_value", F.lit(0))
+                .withColumn("is_numeric_type", F.lit(0))
                 .withColumn("unit", F.lit(NA))
                 .withColumn("event_group_id", F.lit(NA))
                 .drop("prev_date", "time_delta", "is_span_boundary")

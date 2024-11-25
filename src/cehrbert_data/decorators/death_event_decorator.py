@@ -47,7 +47,6 @@ class DeathEventDecorator(PatientEventDecorator):
         #      'visit_occurrence_id', 'domain', 'concept_value', 'visit_rank_order',
         #      'visit_segment', 'priority', 'date_in_week', 'concept_value_mask',
         #      'mlm_skip_value', 'age', 'visit_concept_id'])
-
         artificial_visit_id = F.row_number().over(
             W.partitionBy(F.lit(0)).orderBy("person_id", "cohort_member_id")
         ) + F.col("max_visit_occurrence_id")
