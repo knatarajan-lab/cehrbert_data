@@ -21,8 +21,8 @@ class DemographicEventDecorator(PatientEventDecorator):
             return patient_events
 
         # set(['cohort_member_id', 'person_id', 'standard_concept_id', 'date',
-        #      'visit_occurrence_id', 'domain', 'concept_value', 'visit_rank_order',
-        #      'visit_segment', 'priority', 'date_in_week', 'concept_value_mask',
+        #      'visit_occurrence_id', 'domain', 'value_as_number', 'value_as_concept', 'visit_rank_order',
+        #      'is_numeric_type', 'visit_segment', 'priority', 'date_in_week', 'concept_value_mask',
         #      'mlm_skip_value', 'age', 'visit_concept_id'])
 
         # Get the first token of the patient history
@@ -39,7 +39,9 @@ class DemographicEventDecorator(PatientEventDecorator):
         patient_first_token = (
             patient_events.withColumn("token_order", first_token_udf)
             .withColumn("concept_value_mask", F.lit(0))
-            .withColumn("concept_value", F.lit(0.0))
+            .withColumn("number_as_value", F.lit(0.0))
+            .withColumn("concept_as_value", F.lit(0))
+            .withColumn("is_numeric_type", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
             .where("token_order = 1")
