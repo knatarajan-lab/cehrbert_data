@@ -178,8 +178,8 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
                 F.lit(None).cast("string").alias("event_group_id"),
-                F.lit(0.0).alias("number_as_value"),
-                F.lit(0).alias("concept_as_value"),
+                F.lit(None).cast("float").alias("number_as_value"),
+                F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
             ).distinct()
 
@@ -1442,7 +1442,7 @@ def process_measurement(
             'measurement' AS domain,
             CAST(NULL AS STRING) AS event_group_id,
             m.value_as_number AS number_as_value,
-            0 AS concept_as_value,
+            CAST(NULL AS STRING) AS concept_as_value,
             c.concept_code AS unit
         FROM measurement AS m
         JOIN measurement_unit_stats AS s
@@ -1468,8 +1468,8 @@ def process_measurement(
             m.visit_occurrence_id,
             'categorical_measurement' AS domain,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
-            0.0 AS number_as_value,
-            COALESCE(value_as_concept_id, 0) AS concept_as_value,
+            CAST(NULL AS FLOAT) AS number_as_value,
+            CAST(COALESCE(value_as_concept_id, 0) AS STRING) AS concept_as_value,
             'N/A' AS unit
         FROM measurement AS m
         WHERE EXISTS (
