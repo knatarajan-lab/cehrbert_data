@@ -140,9 +140,9 @@ class ClinicalEventDecorator(PatientEventDecorator):
         )
 
         if "number_as_value" not in patient_events.schema.fieldNames():
-            patient_events = patient_events.withColumn("number_as_value", F.lit(0.0))
+            patient_events = patient_events.withColumn("number_as_value", F.lit(None).cast("float"))
 
         if "concept_as_value" not in patient_events.schema.fieldNames():
-            patient_events = patient_events.withColumn("concept_as_value", F.lit(0))
+            patient_events = patient_events.withColumn("concept_as_value", F.lit(None).cast("string"))
 
         return patient_events
