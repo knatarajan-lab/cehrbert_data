@@ -351,12 +351,14 @@ def create_spark_args(parse: bool = True):
         "--att_type",
         dest="att_type",
         action="store",
+        default=AttType.NONE,
         choices=[e.value for e in AttType],
     )
     parser.add_argument(
         "--inpatient_att_type",
         dest="inpatient_att_type",
         action="store",
+        default=AttType.NONE,
         choices=[e.value for e in AttType],
     )
     parser.add_argument(
@@ -376,5 +378,17 @@ def create_spark_args(parse: bool = True):
         dest="single_contribution",
         action="store_true",
         help="Indicate whether we should contribute once to the training data",
+    )
+    parser.add_argument(
+        "--exclude_features",
+        dest="exclude_features",
+        action="store_true",
+        help="Indicate whether we want to exclude the features",
+    )
+    parser.add_argument(
+        "--meds_format",
+        dest="meds_format",
+        action="store_true",
+        help="Indicate whether we want to generate the cohorts in the MEDS format",
     )
     return parser.parse_args() if parse else parser
