@@ -535,6 +535,8 @@ class NestedCohortBuilder:
             ).withColumnRenamed(
                 "label", "boolean_value"
             ).withColumn(
+                "prediction_time", F.to_timestamp("prediction_time")
+            ).withColumn(
                 "boolean_value", F.col("boolean_value").cast("boolean")
             )
             person_id_column = "subject_id"
