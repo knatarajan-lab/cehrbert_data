@@ -310,6 +310,8 @@ class NestedCohortBuilder:
             exclude_demographic: bool = True,
             use_age_group: bool = False,
             single_contribution: bool = False,
+            exclude_features: bool = True,
+            meds_format: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -351,6 +353,8 @@ class NestedCohortBuilder:
         self._exclude_demographic = exclude_demographic
         self._use_age_group = use_age_group
         self._single_contribution = single_contribution
+        self._exclude_features = exclude_features
+        self._meds_format = meds_format
 
         self.get_logger().info(
             f"cohort_name: {cohort_name}\n"
@@ -386,6 +390,8 @@ class NestedCohortBuilder:
             f"exclude_demographic: {exclude_demographic}\n"
             f"use_age_group: {use_age_group}\n"
             f"single_contribution: {single_contribution}\n"
+            f"extract_features: {exclude_features}\n"
+            f"meds_format: {meds_format}\n"
         )
 
         self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
@@ -511,13 +517,28 @@ class NestedCohortBuilder:
             )
             cohort = cohort.withColumn("record_rank", record_rank).where("record_rank == 1").drop("record_rank")
 
-        ehr_records_for_cohorts = self.extract_ehr_records_for_cohort(cohort)
-        # ehr_records_for_cohorts.show()
-        cohort = (
-            cohort.join(ehr_records_for_cohorts, ["person_id", "cohort_member_id"])
-            .where(F.col("num_of_visits") >= self._num_of_visits)
-            .where(F.col("num_of_concepts") >= self._num_of_concepts)
-        )
+        if not self._exclude_features:
+            ehr_records_for_cohorts = self.extract_ehr_records_for_cohort(cohort)
+            cohort = (
+                cohort.join(ehr_records_for_cohorts, ["person_id", "cohort_member_id"])
+                .where(F.col("num_of_visits") >= self._num_of_visits)
+                .where(F.col("num_of_concepts") >= self._num_of_concepts)
+            )
+
+        person_id_column = "person_id"
+        index_date_column = "index_date"
+        if self._meds_format:
+            cohort = cohort.withColumnRenamed(
+                "person_id", "subject_id"
+            ).withColumnRenamed(
+                "index_date", "prediction_time"
+            ).withColumnRenamed(
+                "label", "boolean_value"
+            ).withColumn(
+                "boolean_value", F.col("boolean_value").cast("boolean")
+            )
+            person_id_column = "subject_id"
+            index_date_column = "prediction_time"
 
         if self._is_prediction_window_unbounded:
             observation_period = self._dependency_dict[OBSERVATION_PERIOD]
@@ -532,9 +553,14 @@ class NestedCohortBuilder:
             # Add time_to_event
             cohort = cohort.withColumn(
                 "study_end_date",
-                F.coalesce(F.col("outcome_date"), F.date_add(cohort.index_date, self._prediction_window))
+                F.coalesce(
+                    F.col("outcome_date"),
+                    F.date_add(
+                        cohort[index_date_column], self._prediction_window
+                    )
+                )
             )
-        cohort = cohort.withColumn("time_to_event", F.datediff("study_end_date", "index_date"))
+        cohort = cohort.withColumn("time_to_event", F.datediff("study_end_date", index_date_column))
 
         # if patient_splits is provided, we will
         if self._patient_splits_folder:
@@ -550,7 +576,7 @@ class NestedCohortBuilder:
             cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(self._output_data_folder, "test"))
             shutil.rmtree(os.path.join(self._output_data_folder, "temp"))
         else:
-            cohort.orderBy("person_id", "cohort_member_id").write.mode("overwrite").parquet(self._output_data_folder)
+            cohort.orderBy(person_id_column, index_date_column).write.mode("overwrite").parquet(self._output_data_folder)
 
     def extract_ehr_records_for_cohort(self, cohort: DataFrame):
         """
@@ -777,4 +803,6 @@ def create_prediction_cohort(
         exclude_demographic=spark_args.exclude_demographic,
         use_age_group=spark_args.use_age_group,
         single_contribution=spark_args.single_contribution,
+        exclude_features=spark_args.exclude_features,
+        meds_format=spark_args.meds_format,
     ).build()
