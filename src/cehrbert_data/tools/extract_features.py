@@ -77,10 +77,16 @@ def main(args):
         withColumnRenamed(args.label_column, "label"). \
         withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
 
-    if PredictionType.REGRESSION:
+    if args.prediction_type == PredictionType.REGRESSION.value:
         cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.FloatType()))
-    else:
+    elif args.prediction_type == PredictionType.BINARY.value:
         cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.IntegerType()))
+    elif args.prediction_type == PredictionType.MULTICLASS.value:
+        cohort_csv = cohort_csv.withColumn("label", (f.col("label") > 0).cast(t.IntegerType()))
+    else:
+        raise RuntimeError(
+            f"args.prediction_type has to be one of the following types {[e.value for e in PredictionType]}"
+        )
 
     cohort_member_id_udf = f.row_number().over(Window.orderBy("person_id", "index_date"))
     cohort_csv = cohort_csv.withColumn("cohort_member_id", cohort_member_id_udf)
