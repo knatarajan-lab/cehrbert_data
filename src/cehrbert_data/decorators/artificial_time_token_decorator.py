@@ -11,6 +11,7 @@ from .token_priority import (
     VISIT_TYPE_TOKEN_PRIORITY,
     DISCHARGE_TOKEN_PRIORITY,
     VE_TOKEN_PRIORITY,
+    FIRST_VISIT_HOUR_TOKEN_PRIORITY,
     get_inpatient_token_priority,
     get_inpatient_att_token_priority
 )
@@ -254,6 +255,29 @@ class AttEventDecorator(PatientEventDecorator):
             inpatient_att_token = F.when(
                 F.col("hour_delta") < 24, F.concat(F.lit("i-H"), F.col("hour_delta"))
             ).otherwise(F.concat(F.lit("i-"), inpatient_time_token_udf("time_delta")))
+
+            # We need to insert an ATT token between midnight and the visit start datetime
+            first_inpatient_hour_delta_udf = (
+                F.floor((F.unix_timestamp("visit_start_datetime") - F.unix_timestamp("visit_start_date")) / 3600)
+            )
+
+            first_hour_tokens = (
+                visits.where(F.col("visit_concept_id").isin([9201, 262, 8971, 8920]))
+                .withColumn("hour_delta", first_inpatient_hour_delta_udf)
+                .where(F.col("hour_delta") > 0)
+                .withColumn("date", F.col("visit_start_date"))
+                .withColumn("datetime", F.to_timestamp("date"))
+                .withColumn("standard_concept_id", F.concat(F.lit("i-H"), F.col("hour_delta")))
+                .withColumn("visit_concept_order", F.col("min_visit_concept_order"))
+                .withColumn("concept_order", F.lit(0))
+                .withColumn("priority", F.lit(FIRST_VISIT_HOUR_TOKEN_PRIORITY))
+                .withColumn("unit", F.lit(NA))
+                .withColumn("event_group_id", F.lit(NA))
+                .drop("min_visit_concept_order", "max_visit_concept_order")
+                .drop("min_concept_order", "max_concept_order")
+                .drop("hour_delta", "visit_end_date")
+            )
+
             # Create ATT tokens within the inpatient visits
             inpatient_att_events = (
                 inpatient_events.withColumn(
@@ -281,6 +305,9 @@ class AttEventDecorator(PatientEventDecorator):
                 .drop("prev_date", "time_delta", "is_span_boundary")
                 .drop("prev_datetime", "hour_delta")
             )
+
+            # Insert the first hour tokens between the visit type and first medical event
+            inpatient_att_events = inpatient_att_events.unionByName(first_hour_tokens)
         else:
             # Create ATT tokens within the inpatient visits
             inpatient_att_events = (
