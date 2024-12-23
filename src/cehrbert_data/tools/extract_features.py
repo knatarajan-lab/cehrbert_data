@@ -57,6 +57,11 @@ def create_feature_extraction_args():
         '--bound_visit_end_date',
         action='store_true',
     )
+    spark_args.add_argument(
+        "--include_inpatient_hour_token",
+        dest="include_inpatient_hour_token",
+        action="store_true",
+    )
     return spark_args.parse_args()
 
 
@@ -188,7 +193,8 @@ def main(args):
             att_type=AttType(args.att_type),
             inpatient_att_type=AttType(args.inpatient_att_type),
             exclude_demographic=args.exclude_demographic,
-            use_age_group=args.use_age_group
+            use_age_group=args.use_age_group,
+            include_inpatient_hour_token=args.include_inpatient_hour_token
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(
