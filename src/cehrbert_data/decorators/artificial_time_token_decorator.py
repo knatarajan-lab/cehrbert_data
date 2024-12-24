@@ -258,7 +258,8 @@ class AttEventDecorator(PatientEventDecorator):
 
             # We need to insert an ATT token between midnight and the visit start datetime
             first_inpatient_hour_delta_udf = (
-                F.floor((F.unix_timestamp("visit_start_datetime") - F.unix_timestamp("visit_start_date")) / 3600)
+                F.floor((F.unix_timestamp("visit_start_datetime") - F.unix_timestamp(
+                    F.col("visit_start_datetime").cast("date"))) / 3600)
             )
 
             first_hour_tokens = (
