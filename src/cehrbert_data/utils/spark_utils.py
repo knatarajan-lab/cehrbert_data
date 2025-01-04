@@ -1501,7 +1501,7 @@ def process_measurement(
         )
     """
     )
-    return numeric_lab.unionAll(categorical_lab)
+    return numeric_lab.unionByName(categorical_lab)
 
 
 def get_mlm_skip_domains(spark, input_folder, mlm_skip_table_list):
