@@ -833,14 +833,15 @@ def create_concept_frequency_data(patient_event, date_filter=None):
 
 
 def extract_ehr_records(
-        spark,
-        input_folder,
-        domain_table_list,
-        include_visit_type=False,
-        with_diagnosis_rollup=False,
-        with_drug_rollup=True,
-        include_concept_list=False,
-        refresh_measurement=False
+        spark: SparkSession,
+        input_folder: str,
+        domain_table_list: List[str],
+        include_visit_type: bool = False,
+        with_diagnosis_rollup: bool = False,
+        with_drug_rollup: bool = True,
+        include_concept_list: bool = False,
+        refresh_measurement: bool = False,
+        aggregate_by_hour: bool = False,
 ):
     """
     Extract the ehr records for domain_table_list from input_folder.
@@ -853,6 +854,7 @@ def extract_ehr_records(
     :param with_drug_rollup: whether ot not to roll up the drug concepts to the parent levels
     :param include_concept_list:
     :param refresh_measurement:
+    :param aggregate_by_hour:
     :return:
     """
     domain_tables = []
@@ -881,7 +883,8 @@ def extract_ehr_records(
         processed_measurement = get_measurement_table(
             spark,
             input_folder,
-            refresh=refresh_measurement
+            refresh=refresh_measurement,
+            aggregate_by_hour=aggregate_by_hour,
         )
         if patient_ehr_records:
             # Union all measurement records together with other domain records
@@ -1367,7 +1370,8 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
 def get_measurement_table(
         spark: SparkSession,
         input_folder: str,
-        refresh: bool = False
+        refresh: bool = False,
+        aggregate_by_hour: bool = False,
 ) -> DataFrame:
     """
     A helper function to process and create the measurement table
@@ -1375,6 +1379,7 @@ def get_measurement_table(
     :param spark:
     :param input_folder:
     :param refresh:
+    :param aggregate_by_hour:
 
     :return:
     """
@@ -1398,7 +1403,7 @@ def get_measurement_table(
         processed_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
     else:
         processed_measurement = process_measurement(
-            spark, measurement, required_measurement, measurement_stats, concept
+            spark, measurement, required_measurement, measurement_stats, concept, aggregate_by_hour
         )
         processed_measurement.write.mode("overwrite").parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
 
@@ -1410,7 +1415,8 @@ def process_measurement(
         measurement: DataFrame,
         required_measurement: DataFrame,
         measurement_stats: DataFrame,
-        concept: DataFrame
+        concept: DataFrame,
+        aggregate_by_hour: bool = False
 ):
     """
     Preprocess the measurement table and only include the measurements whose measurement_concept_ids are specified
@@ -1454,8 +1460,22 @@ def process_measurement(
             AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
     """
     )
-    numeric_lab = clean_up_unit(numeric_lab)
+    if aggregate_by_hour:
+        numeric_lab = numeric_lab.withColumn("lab_hour", F.hour("datetime"))
+        numeric_lab = numeric_lab.groupby(
+            "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "hour"
+        ).agg(
+            F.min("datetime").alias("datetime"),
+            F.avg("number_as_value").alias("number_as_value"),
+        ).withColumn(
+            "domain", F.lit("measurement").cast("string")
+        ).withColumn(
+            "concept_as_value", F.lit(None).cast("string")
+        ).withColumn(
+            "event_group_id", F.lit(None).cast("string")
+        ).drop("hour")
 
+    numeric_lab = clean_up_unit(numeric_lab)
     # For categorical measurements in required_measurement, we concatenate measurement_concept_id
     # with value_as_concept_id to construct a new standard_concept_id
     categorical_lab = spark.sql(

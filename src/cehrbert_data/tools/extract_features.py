@@ -104,6 +104,7 @@ def main(args):
         with_drug_rollup=args.is_drug_roll_up_concept,
         include_concept_list=args.include_concept_list,
         refresh_measurement=args.refresh_measurement,
+        aggregate_by_hour=args.aggregate_by_hour,
     )
 
     # Drop index_date because create_sequence_data_with_att does not expect this column

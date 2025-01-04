@@ -336,6 +336,12 @@ def create_spark_args(parse: bool = True):
         help="Apply the filter to remove low-frequency concepts",
     )
     parser.add_argument(
+        "--aggregate_by_hour",
+        dest="aggregate_by_hour",
+        action="store_true",
+        help="Apply the aggregation on numeric labs by hour",
+    )
+    parser.add_argument(
         "--allow_measurement_only",
         dest="allow_measurement_only",
         action="store_true",

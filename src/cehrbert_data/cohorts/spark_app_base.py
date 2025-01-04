@@ -295,6 +295,7 @@ class NestedCohortBuilder:
             is_drug_roll_up_concept: bool = True,
             include_concept_list: bool = True,
             refresh_measurement: bool = False,
+            aggregate_by_hour: bool = True,
             is_new_patient_representation: bool = False,
             gpt_patient_sequence: bool = False,
             is_hierarchical_bert: bool = False,
@@ -343,6 +344,7 @@ class NestedCohortBuilder:
         self._is_prediction_window_unbounded = is_prediction_window_unbounded
         self._include_concept_list = include_concept_list
         self._refresh_measurement = refresh_measurement
+        self._aggregate_by_hour = aggregate_by_hour
         self._allow_measurement_only = allow_measurement_only
         self._output_data_folder = os.path.join(
             self._output_folder, re.sub("[^a-z0-9]+", "_", self._cohort_name.lower())
@@ -383,6 +385,7 @@ class NestedCohortBuilder:
             f"is_prediction_window_unbounded: {is_prediction_window_unbounded}\n"
             f"include_concept_list: {include_concept_list}\n"
             f"refresh_measurement: {refresh_measurement}\n"
+            f"aggregate_by_hour: {aggregate_by_hour}\n"
             f"is_observation_window_unbounded: {is_observation_window_unbounded}\n"
             f"is_population_estimation: {is_population_estimation}\n"
             f"att_type: {att_type}\n"
@@ -597,6 +600,7 @@ class NestedCohortBuilder:
             with_drug_rollup=self._is_drug_roll_up_concept,
             include_concept_list=self._include_concept_list,
             refresh_measurement=self._refresh_measurement,
+            aggregate_by_hour=self._aggregate_by_hour,
         )
 
         # Duplicate the records for cohorts that allow multiple entries
@@ -786,6 +790,7 @@ def create_prediction_cohort(
         is_drug_roll_up_concept=spark_args.is_drug_roll_up_concept,
         include_concept_list=spark_args.include_concept_list,
         refresh_measurement=spark_args.refresh_measurement,
+        aggregate_by_hour=spark_args.aggregate_by_hour,
         is_new_patient_representation=spark_args.is_new_patient_representation,
         gpt_patient_sequence=spark_args.gpt_patient_sequence,
         is_hierarchical_bert=spark_args.is_hierarchical_bert,
