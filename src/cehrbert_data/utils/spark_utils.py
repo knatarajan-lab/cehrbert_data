@@ -1444,7 +1444,7 @@ def process_measurement(
             m.measurement_concept_id AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
-            m.visit_occurrence_id,
+            m.visit_occurrence_id AS visit_occurrence_id,
             'measurement' AS domain,
             CAST(NULL AS STRING) AS event_group_id,
             m.value_as_number AS number_as_value,
@@ -1463,7 +1463,7 @@ def process_measurement(
     if aggregate_by_hour:
         numeric_lab = numeric_lab.withColumn("lab_hour", F.hour("datetime"))
         numeric_lab = numeric_lab.groupby(
-            "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "hour"
+            "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "lab_hour"
         ).agg(
             F.min("datetime").alias("datetime"),
             F.avg("number_as_value").alias("number_as_value"),
@@ -1473,7 +1473,7 @@ def process_measurement(
             "concept_as_value", F.lit(None).cast("string")
         ).withColumn(
             "event_group_id", F.lit(None).cast("string")
-        ).drop("hour")
+        ).drop("lab_hour")
 
     numeric_lab = clean_up_unit(numeric_lab)
     # For categorical measurements in required_measurement, we concatenate measurement_concept_id
@@ -1485,7 +1485,7 @@ def process_measurement(
             measurement_concept_id AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
-            m.visit_occurrence_id,
+            m.visit_occurrence_id AS visit_occurrence_id,
             'categorical_measurement' AS domain,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
             CAST(NULL AS FLOAT) AS number_as_value,
