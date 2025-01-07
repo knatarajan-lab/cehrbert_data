@@ -235,6 +235,9 @@ class AttEventDecorator(PatientEventDecorator):
         # Add discharge events to the inpatient visits
         inpatient_events = inpatient_events.unionByName(discharge_events)
 
+        # Try caching the inpatient events
+        inpatient_events.cache()
+
         # Get the prev days_since_epoch
         inpatient_prev_date_udf = F.lag("date").over(
             W.partitionBy("cohort_member_id", "visit_occurrence_id").orderBy("concept_order")
