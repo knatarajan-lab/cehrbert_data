@@ -14,7 +14,7 @@ class ClinicalEventDecorator(PatientEventDecorator):
     # output_columns = [
     #     'cohort_member_id', 'person_id', 'concept_ids', 'visit_segments', 'orders',
     #     'dates', 'ages', 'visit_concept_orders', 'num_of_visits', 'num_of_concepts',
-    #     'concept_value_masks', 'concept_values', 'mlm_skip_values',
+    #     'concept_value_masks', 'value_as_numbers', 'value_as_concepts', 'mlm_skip_values',
     #     'visit_concept_ids', "units"
     # ]
     def __init__(self, visit_occurrence):
@@ -131,38 +131,18 @@ class ClinicalEventDecorator(PatientEventDecorator):
         # Create the concept_value_mask field to indicate whether domain values should be skipped
         # As of now only measurement has values, so other domains would be skipped.
         patient_events = patient_events.withColumn(
-            "concept_value_mask", (F.col("domain") == MEASUREMENT).cast("int")
+            "concept_value_mask", (F.col("domain").isin(MEASUREMENT, CATEGORICAL_MEASUREMENT)).cast("int")
+        ).withColumn(
+            "is_numeric_type", (F.col("domain") == MEASUREMENT).cast("int")
         ).withColumn(
             "mlm_skip_value",
             (F.col("domain").isin([MEASUREMENT, CATEGORICAL_MEASUREMENT])).cast("int"),
         )
 
-        if "concept_value" not in patient_events.schema.fieldNames():
-            patient_events = patient_events.withColumn("concept_value", F.lit(0.0))
+        if "number_as_value" not in patient_events.schema.fieldNames():
+            patient_events = patient_events.withColumn("number_as_value", F.lit(None).cast("float"))
 
-        # Split the categorical measurement standard_concept_id into the question/answer pairs
-        categorical_measurement_events = (
-            patient_events.where(F.col("domain") == CATEGORICAL_MEASUREMENT)
-            .withColumn("measurement_components", F.split("standard_concept_id", "-"))
-        )
+        if "concept_as_value" not in patient_events.schema.fieldNames():
+            patient_events = patient_events.withColumn("concept_as_value", F.lit(None).cast("string"))
 
-        categorical_measurement_events_question = categorical_measurement_events.withColumn(
-            "standard_concept_id",
-            F.concat(F.lit(MEASUREMENT_QUESTION_PREFIX), F.col("measurement_components").getItem(0))
-        ).drop("measurement_components")
-
-        categorical_measurement_events_answer = categorical_measurement_events.withColumn(
-            "standard_concept_id",
-            F.concat(F.lit(MEASUREMENT_ANSWER_PREFIX), F.coalesce(F.col("measurement_components").getItem(1), F.lit("0")))
-        ).drop("measurement_components")
-
-        other_events = patient_events.where(F.col("domain") != CATEGORICAL_MEASUREMENT)
-
-        # (cohort_member_id, person_id, standard_concept_id, date, datetime, visit_occurrence_id, domain,
-        # concept_value, visit_rank_order, visit_segment, priority, date_in_week,
-        # concept_value_mask, mlm_skip_value, age)
-        return other_events.unionByName(
-            categorical_measurement_events_question
-        ).unionByName(
-            categorical_measurement_events_answer
-        )
+        return patient_events

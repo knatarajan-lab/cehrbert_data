@@ -57,6 +57,11 @@ def create_feature_extraction_args():
         '--bound_visit_end_date',
         action='store_true',
     )
+    spark_args.add_argument(
+        "--include_inpatient_hour_token",
+        dest="include_inpatient_hour_token",
+        action="store_true",
+    )
     return spark_args.parse_args()
 
 
@@ -99,6 +104,7 @@ def main(args):
         with_drug_rollup=args.is_drug_roll_up_concept,
         include_concept_list=args.include_concept_list,
         refresh_measurement=args.refresh_measurement,
+        aggregate_by_hour=args.aggregate_by_hour,
     )
 
     # Drop index_date because create_sequence_data_with_att does not expect this column
@@ -108,45 +114,53 @@ def main(args):
     ).where(ehr_records["date"] <= cohort["index_date"])
 
     ehr_records_temp_folder = get_temp_folder(args, "ehr_records")
-    ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
+    ehr_records.repartition("person_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
     ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+    cohort_visit_occurrence = visit_occurrence.join(
+        cohort.select("person_id").distinct(),
+        "person_id"
+    ).withColumn(
+        "visit_end_date",
+        f.coalesce(f.col("visit_end_date"), f.col("visit_start_date"))
+    ).withColumn(
+        "visit_end_datetime",
+        f.coalesce(
+            f.col("visit_end_datetime"),
+            f.col("visit_end_date").cast(t.TimestampType()),
+            f.col("visit_start_datetime")
+        )
+    )
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
-        visit_occurrence_bound = ehr_records.withColumn(
-            "rn",
-            f.row_number().over(Window.partitionBy("person_id", "index_date").orderBy(f.desc("datetime")))
-        ).where(
-            f.col("rn") == 1
-        ).select(
-            "visit_occurrence_id",
-            "index_date",
+        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
+            "order", f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
         )
+
+        visit_index_date = cohort_visit_occurrence.alias("visit").join(
+            cohort.alias("cohort"),
+            "person_id"
+        ).where(
+            f.col("cohort.index_date").between(f.col("visit.visit_start_datetime"), f.col("visit.visit_end_datetime"))
+        ).select(
+            f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
+            f.col("cohort.index_date").alias("index_date"),
+        )
+
         # Bound the visit_end_date and visit_end_datetime
-        visit_occurrence = visit_occurrence.join(
-            visit_occurrence_bound,
+        cohort_visit_occurrence = cohort_visit_occurrence.join(
+            visit_index_date,
             "visit_occurrence_id",
             "left_outer",
         ).withColumn(
             "visit_end_date",
-            f.coalesce(f.col("visit_end_date"), f.col("visit_start_date"))
+            f.coalesce(f.col("index_date").cast(t.DateType()), f.col("visit_end_date"))
         ).withColumn(
             "visit_end_datetime",
-            f.coalesce(
-                f.col("visit_end_datetime"),
-                f.col("visit_end_date").cast(t.TimestampType()),
-                f.col("visit_start_datetime")
-            )
-        ).withColumn(
-            "visit_end_date",
-            f.least(f.col("visit_end_date"), f.col("index_date").cast(t.DateType()))
-        ).withColumn(
-            "visit_end_datetime",
-            f.least(f.col("visit_end_datetime"), f.col("index_date"))
-        )
-
+            f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
+        ).orderBy(f.col("order")).drop("order")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -162,7 +176,7 @@ def main(args):
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
-        visit_occurrence
+        cohort_visit_occurrence
         .join(patient_demographic, "person_id")
         .withColumn("age", age_udf)
         .drop("birth_datetime")
@@ -177,10 +191,11 @@ def main(args):
             patient_demographic=(
                 patient_demographic if args.gpt_patient_sequence else None
             ),
-            att_type=AttType.DAY,
-            inpatient_att_type=AttType.DAY,
+            att_type=AttType(args.att_type),
+            inpatient_att_type=AttType(args.inpatient_att_type),
             exclude_demographic=args.exclude_demographic,
-            use_age_group=args.use_age_group
+            use_age_group=args.use_age_group,
+            include_inpatient_hour_token=args.include_inpatient_hour_token
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(

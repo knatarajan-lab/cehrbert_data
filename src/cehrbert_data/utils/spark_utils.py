@@ -68,7 +68,7 @@ DOMAIN_KEY_FIELDS = {
             "measurement"
         )
     ],
-    "death_date": [("death_concept_id", "death_date", "death_datetime", "death")],
+    "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
         ("discharged_to_concept_id", "visit_end_date", "visit"),
@@ -178,7 +178,8 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
                 F.lit(None).cast("string").alias("event_group_id"),
-                F.lit(0.0).alias("concept_value"),
+                F.lit(None).cast("float").alias("number_as_value"),
+                F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
             ).distinct()
 
@@ -716,7 +717,6 @@ def create_sequence_data_with_att(
             "concept_order",
             "priority",
             "datetime",
-            "event_group_id",
             "standard_concept_id",
         )
     )
@@ -737,14 +737,15 @@ def create_sequence_data_with_att(
         "age",
         "visit_rank_order",
         "concept_value_mask",
-        "concept_value",
+        "number_as_value",
+        "concept_as_value",
+        "is_numeric_type",
         "mlm_skip_value",
         "visit_concept_id",
         "visit_concept_order",
         "concept_order",
         "priority",
         "unit",
-        "event_group_id",
     ]
     output_columns = [
         "cohort_member_id",
@@ -758,7 +759,9 @@ def create_sequence_data_with_att(
         "num_of_visits",
         "num_of_concepts",
         "concept_value_masks",
-        "concept_values",
+        "number_as_values",
+        "concept_as_values",
+        "is_numeric_types",
         "mlm_skip_values",
         "priorities",
         "visit_concept_ids",
@@ -766,7 +769,6 @@ def create_sequence_data_with_att(
         "concept_orders",
         "record_ranks",
         "units",
-        "event_group_ids",
     ]
 
     patient_grouped_events = (
@@ -793,13 +795,13 @@ def create_sequence_data_with_att(
         .withColumn("concept_orders", F.col("data_for_sorting.concept_order"))
         .withColumn("priorities", F.col("data_for_sorting.priority"))
         .withColumn("concept_value_masks", F.col("data_for_sorting.concept_value_mask"))
-        .withColumn("concept_values", F.col("data_for_sorting.concept_value"))
+        .withColumn("number_as_values", F.col("data_for_sorting.number_as_value"))
+        .withColumn("concept_as_values", F.col("data_for_sorting.concept_as_value"))
+        .withColumn("is_numeric_types", F.col("data_for_sorting.is_numeric_type"))
         .withColumn("mlm_skip_values", F.col("data_for_sorting.mlm_skip_value"))
         .withColumn("visit_concept_ids", F.col("data_for_sorting.visit_concept_id"))
         .withColumn("units", F.col("data_for_sorting.unit"))
-        .withColumn("event_group_ids", F.col("data_for_sorting.event_group_id"))
     )
-
     return patient_grouped_events.select(output_columns)
 
 
@@ -831,14 +833,15 @@ def create_concept_frequency_data(patient_event, date_filter=None):
 
 
 def extract_ehr_records(
-        spark,
-        input_folder,
-        domain_table_list,
-        include_visit_type=False,
-        with_diagnosis_rollup=False,
-        with_drug_rollup=True,
-        include_concept_list=False,
-        refresh_measurement=False
+        spark: SparkSession,
+        input_folder: str,
+        domain_table_list: List[str],
+        include_visit_type: bool = False,
+        with_diagnosis_rollup: bool = False,
+        with_drug_rollup: bool = True,
+        include_concept_list: bool = False,
+        refresh_measurement: bool = False,
+        aggregate_by_hour: bool = False,
 ):
     """
     Extract the ehr records for domain_table_list from input_folder.
@@ -851,6 +854,7 @@ def extract_ehr_records(
     :param with_drug_rollup: whether ot not to roll up the drug concepts to the parent levels
     :param include_concept_list:
     :param refresh_measurement:
+    :param aggregate_by_hour:
     :return:
     """
     domain_tables = []
@@ -872,7 +876,6 @@ def extract_ehr_records(
         qualified_concepts = preprocess_domain_table(spark, input_folder, QUALIFIED_CONCEPT_LIST_PATH).select(
             "standard_concept_id"
         )
-
         patient_ehr_records = patient_ehr_records.join(qualified_concepts, "standard_concept_id")
 
     # Process the measurement table if exists
@@ -880,7 +883,8 @@ def extract_ehr_records(
         processed_measurement = get_measurement_table(
             spark,
             input_folder,
-            refresh=refresh_measurement
+            refresh=refresh_measurement,
+            aggregate_by_hour=aggregate_by_hour,
         )
         if patient_ehr_records:
             # Union all measurement records together with other domain records
@@ -914,7 +918,8 @@ def extract_ehr_records(
             patient_ehr_records["visit_occurrence_id"],
             patient_ehr_records["domain"],
             patient_ehr_records["unit"],
-            patient_ehr_records["concept_value"],
+            patient_ehr_records["number_as_value"],
+            patient_ehr_records["concept_as_value"],
             patient_ehr_records["event_group_id"],
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
@@ -1068,7 +1073,7 @@ def create_hierarchical_sequence_data(
         F.coalesce(patient_events["standard_concept_id"], F.lit(UNKNOWN_CONCEPT)).alias("standard_concept_id"),
         F.coalesce(patient_events["date"], visit_occurrence["visit_start_date"]).alias("date"),
         F.coalesce(patient_events["domain"], F.lit("unknown")).alias("domain"),
-        F.coalesce(patient_events["concept_value"], F.lit(-1.0)).alias("concept_value"),
+        F.coalesce(patient_events["number_as_value"], F.lit(-1.0)).alias("number_as_value"),
     ]
 
     # Convert standard_concept_id to string type, this is needed for the tokenization
@@ -1125,7 +1130,7 @@ def create_hierarchical_sequence_data(
         .withColumn("visit_concept_order", F.lit(0))
         .withColumn("date", F.col("visit_start_date"))
         .withColumn("concept_value_mask", F.lit(0))
-        .withColumn("concept_value", F.lit(-1.0))
+        .withColumn("number_as_value", F.lit(-1.0))
         .withColumn("mlm_skip", F.lit(1))
         .withColumn("condition_mask", F.lit(0))
     )
@@ -1137,7 +1142,7 @@ def create_hierarchical_sequence_data(
         "date_in_week",
         "age",
         "concept_value_mask",
-        "concept_value",
+        "number_as_value",
         "mlm_skip",
         "condition_mask",
     ]
@@ -1365,7 +1370,8 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
 def get_measurement_table(
         spark: SparkSession,
         input_folder: str,
-        refresh: bool = False
+        refresh: bool = False,
+        aggregate_by_hour: bool = False,
 ) -> DataFrame:
     """
     A helper function to process and create the measurement table
@@ -1373,6 +1379,7 @@ def get_measurement_table(
     :param spark:
     :param input_folder:
     :param refresh:
+    :param aggregate_by_hour:
 
     :return:
     """
@@ -1396,7 +1403,7 @@ def get_measurement_table(
         processed_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
     else:
         processed_measurement = process_measurement(
-            spark, measurement, required_measurement, measurement_stats, concept
+            spark, measurement, required_measurement, measurement_stats, concept, aggregate_by_hour
         )
         processed_measurement.write.mode("overwrite").parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
 
@@ -1408,7 +1415,8 @@ def process_measurement(
         measurement: DataFrame,
         required_measurement: DataFrame,
         measurement_stats: DataFrame,
-        concept: DataFrame
+        concept: DataFrame,
+        aggregate_by_hour: bool = False
 ):
     """
     Preprocess the measurement table and only include the measurements whose measurement_concept_ids are specified
@@ -1436,10 +1444,11 @@ def process_measurement(
             m.measurement_concept_id AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
-            m.visit_occurrence_id,
+            m.visit_occurrence_id AS visit_occurrence_id,
             'measurement' AS domain,
             CAST(NULL AS STRING) AS event_group_id,
-            m.value_as_number AS concept_value,
+            m.value_as_number AS number_as_value,
+            CAST(NULL AS STRING) AS concept_as_value,
             c.concept_code AS unit
         FROM measurement AS m
         JOIN measurement_unit_stats AS s
@@ -1451,22 +1460,37 @@ def process_measurement(
             AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
     """
     )
-    numeric_lab = clean_up_unit(numeric_lab)
+    if aggregate_by_hour:
+        numeric_lab = numeric_lab.withColumn("lab_hour", F.hour("datetime"))
+        numeric_lab = numeric_lab.groupby(
+            "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "lab_hour"
+        ).agg(
+            F.min("datetime").alias("datetime"),
+            F.avg("number_as_value").alias("number_as_value"),
+        ).withColumn(
+            "domain", F.lit("measurement").cast("string")
+        ).withColumn(
+            "concept_as_value", F.lit(None).cast("string")
+        ).withColumn(
+            "event_group_id", F.lit(None).cast("string")
+        ).drop("lab_hour")
 
+    numeric_lab = clean_up_unit(numeric_lab)
     # For categorical measurements in required_measurement, we concatenate measurement_concept_id
     # with value_as_concept_id to construct a new standard_concept_id
     categorical_lab = spark.sql(
         """
         SELECT
             m.person_id,
-            CONCAT(CAST(measurement_concept_id AS STRING),  '-', CAST(COALESCE(value_as_concept_id, 0) AS STRING)) AS standard_concept_id,
+            measurement_concept_id AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
-            m.visit_occurrence_id,
+            m.visit_occurrence_id AS visit_occurrence_id,
             'categorical_measurement' AS domain,
             CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
-            0.0 AS concept_value,
-            'N/A' AS unit,
+            CAST(NULL AS FLOAT) AS number_as_value,
+            CAST(COALESCE(value_as_concept_id, 0) AS STRING) AS concept_as_value,
+            'N/A' AS unit
         FROM measurement AS m
         WHERE EXISTS (
             SELECT
@@ -1477,7 +1501,7 @@ def process_measurement(
         )
     """
     )
-    return numeric_lab.unionAll(categorical_lab)
+    return numeric_lab.unionByName(categorical_lab)
 
 
 def get_mlm_skip_domains(spark, input_folder, mlm_skip_table_list):

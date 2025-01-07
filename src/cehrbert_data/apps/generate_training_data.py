@@ -48,7 +48,8 @@ def main(
         with_drug_rollup: bool = True,
         include_inpatient_hour_token: bool = False,
         continue_from_events: bool = False,
-        refresh_measurement: bool = False
+        refresh_measurement: bool = False,
+        aggregate_by_hour: bool = True,
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -72,6 +73,7 @@ def main(
         f"use_age_group: {use_age_group}\n"
         f"with_drug_rollup: {with_drug_rollup}\n"
         f"refresh_measurement: {refresh_measurement}\n"
+        f"aggregate_by_hour: {aggregate_by_hour}\n"
     )
 
     domain_tables = []
@@ -129,7 +131,8 @@ def main(
         processed_measurement = get_measurement_table(
             spark,
             input_folder,
-            refresh=refresh_measurement
+            refresh=refresh_measurement,
+            aggregate_by_hour=aggregate_by_hour,
         )
         if patient_events:
             # Union all measurement records together with other domain records
@@ -328,6 +331,11 @@ if __name__ == "__main__":
         action="store_true"
     )
     parser.add_argument(
+        "--aggregate_by_hour",
+        dest="aggregate_by_hour",
+        action="store_true"
+    )
+    parser.add_argument(
         "--att_type",
         dest="att_type",
         action="store",
@@ -367,4 +375,5 @@ if __name__ == "__main__":
         include_inpatient_hour_token=ARGS.include_inpatient_hour_token,
         continue_from_events=ARGS.continue_from_events,
         refresh_measurement=ARGS.refresh_measurement,
+        aggregate_by_hour=ARGS.aggregate_by_hour,
     )

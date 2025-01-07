@@ -23,6 +23,7 @@ class GenerateTrainingDataTest(PySparkAbstract):
             gpt_patient_sequence=True,
             apply_age_filter=True,
             include_death=False,
+            include_inpatient_hour_token=True,
             att_type=AttType.DAY,
             inpatient_att_type=AttType.DAY,
         )

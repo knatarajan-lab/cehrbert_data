@@ -98,7 +98,7 @@ def get_schema() -> t.StructType:
         t.StructField("code", t.StringType(), True),
         t.StructField("value", t.StringType(), True),
         t.StructField("unit", t.StringType(), True),
-        t.StructField("visit_id", t.LongType(), True),  # Converted to IntegerType
+        t.StructField("visit_id", t.StringType(), True),  # Converted to IntegerType
         t.StructField("omop_table", t.StringType(), True)
     ])
 
@@ -418,81 +418,177 @@ def convert_code_to_omop_concept(
     ).select(output_columns)
 
 
-def generate_visit_id(data: DataFrame, time_interval: int = 12) -> DataFrame:
+def generate_visit_id(data: DataFrame) -> DataFrame:
     """
-    Generates unique `visit_id`s for each visit based on time intervals between events per patient.
+     Generates unique `visit_id`s for each visit based on distinct patient event records.
 
-    This function identifies distinct visits within a patient's event history by analyzing time gaps
-    between consecutive events. Events with gaps exceeding the specified `time_interval` (in hours)
-    are considered separate visits. A unique integer `visit_id` is then assigned to each visit
-    using a hash of the patient ID and visit order.
+     This function identifies records associated with actual visits (`visit_occurrence` table) and assigns
+     `visit_id`s to those records. For other event records without a `visit_id`, it attempts to link them to
+     existing visits based on overlapping date ranges. If no matching visit is found, it generates new `visit_id`s
+     for these orphan records and creates artificial visits.
 
-    Parameters
-    ----------
-    data : DataFrame
-        A PySpark DataFrame containing at least the following columns:
-        - `patient_id`: Identifier for each patient.
-        - `start`: Start timestamp of the event.
-        - `end`: (Optional) End timestamp of the event.
+     Parameters
+     ----------
+     data : DataFrame
+         A PySpark DataFrame containing at least the following columns:
+         - `patient_id`: Identifier for each patient.
+         - `start`: Start timestamp of the event.
+         - `end`: (Optional) End timestamp of the event.
+         - `omop_table`: String specifying the type of event (e.g., "visit_occurrence" for real visits).
+         - `visit_id`: (Optional) Identifier for visits. May be missing in some records.
 
-    time_interval : int, optional, default=12
-        The maximum time gap in hours between consecutive events within the same visit. If the time
-        difference between two events exceeds this interval, a new visit is assigned.
+     Returns
+     -------
+     DataFrame
+         A DataFrame with a `visit_id` assigned to each event record, including both real visits and artificial visits.
+         The returned DataFrame includes both the original records and any generated artificial visit records,
+         with each record grouped according to the identified visit.
 
-    Returns
-    -------
-    DataFrame
-        The input DataFrame with an additional `visit_id` column, which is a unique integer identifier
-        for each visit, and each `patient_id`'s events are grouped according to visit.
-    """
-    order_window = Window.partitionBy("patient_id").orderBy(f.col("start"))
-
-    data = data.repartition(16).withColumn(
-        "patient_event_order", f.row_number().over(order_window)
-    ).withColumn(
-        "time", f.coalesce(f.col("end"), f.col("start"))
-    ).withColumn(
-        "prev_time", f.coalesce(f.lag(f.col("time")).over(order_window), f.col("time"))
-    ).withColumn(
-        "hour_diff", (f.unix_timestamp("start") - f.unix_timestamp("prev_time")) / 3600
-    ).withColumn(
-        "is_gap", (f.col("hour_diff") > time_interval).cast(t.IntegerType())
-    ).drop(
-        "time", "prev_time", "hour_diff"
-    )
-
-    cumulative_window = Window.partitionBy("patient_id").orderBy("patient_event_order").rowsBetween(
-        Window.unboundedPreceding,
-        Window.currentRow
-    )
-
-    data = data.withColumn(
-        "visit_order",
-        f.sum("is_gap").over(cumulative_window)
-    ).drop(
-        "is_gap"
-    )
-
-    # We only allow the generated visit_ids associated with the visit_occurrence table
-    visit = data.where(
+     Steps
+     -----
+     1. **Identify Real Visits**: Filters out records from `visit_occurrence` and sets start and end dates for each visit.
+     2. **Assign `visit_id`s to Other Records**: Attempts to link non-visit records (from other tables) to real visits
+        based on matching `patient_id` and date ranges.
+     3. **Handle Orphan Records**: For records without a matching visit, assigns new `visit_id`s by grouping
+        records by patient and start date.
+     4. **Create Artificial Visits**: Generates artificial visit records for orphan `visit_id`s.
+     5. **Merge and Validate**: Combines the original records with artificial visits and validates the uniqueness of each `visit_id`.
+     """
+    data = data.repartition(16)
+    real_visits = data.where(
         f.col("omop_table") == "visit_occurrence"
-    ).select("patient_id", "visit_order").distinct().withColumn(
-        "new_visit_id",
-        f.abs(
-            f.hash(f.concat(f.col("patient_id").cast("string"), f.col("visit_order").cast("string")))
-        ).cast("bigint")
+    ).withColumn(
+        "visit_start_date",
+        f.col("start").cast(t.DateType())
+    ).withColumn(
+        "visit_end_date",
+        f.coalesce(f.col("end").cast(t.DateType()), f.col("visit_start_date"))
     )
+
+    # Getting the records that do not have a visit_id
+    domain_records = data.where(
+        f.col("omop_table") != "visit_occurrence"
+    ).withColumn(
+        "record_id",
+        f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
+    )
+
+    # This is important to have a deterministic behavior for generating record_id
+    domain_records.cache()
+
+    # Invalidate visit_id if the record's time stamp falls outside the visit start/end
+    domain_records = domain_records.alias("domain").join(
+        real_visits.where("code == 'Visit/IP'").alias("in_visit"),
+        (f.col("domain.patient_id") == f.col("in_visit.patient_id")) &
+        (f.col("domain.visit_id") == f.col("in_visit.visit_id")),
+        "left_outer"
+    ).withColumn(
+        "new_visit_id",
+        f.coalesce(
+            f.when(
+                f.col("domain.start").between(
+                    f.date_sub(f.col("in_visit.start"), 1), f.date_add(f.col("in_visit.end"), 1)
+                ),
+                f.col("domain.visit_id")
+            ).otherwise(f.lit(None).cast(t.LongType())),
+            f.col("domain.visit_id")
+        )
+    ).select(
+        [
+            f.col("domain." + field).alias(field)
+            for field in domain_records.schema.fieldNames() if not field.endswith("visit_id")
+        ] + [f.col("new_visit_id").alias("visit_id")]
+    )
+
+    # Join the DataFrames with aliasing
+    domain_records = domain_records.alias("domain").join(
+        real_visits.alias("visit"),
+        (f.col("domain.patient_id") == f.col("visit.patient_id")) &
+        (f.col("domain.start").cast(t.DateType()).between(f.col("visit.visit_start_date"),
+                                                          f.col("visit.visit_end_date"))),
+        "left_outer"
+    ).withColumn(
+        "ranking",
+        f.row_number().over(Window.partitionBy("domain.record_id").orderBy(f.col("visit.visit_start_date").desc()))
+    ).where(
+        f.col("ranking") == 1
+    ).select(
+        [f.col("domain." + _).alias(_) for _ in domain_records.schema.fieldNames() if _ != "visit_id"] +
+        [f.coalesce(f.col("visit.visit_id"), f.col("domain.visit_id")).alias("visit_id")]
+    )
+
+    max_visit_id_df = real_visits.select(f.max("visit_id").alias("max_visit_id"))
+    orphan_records = domain_records.where(
+        f.col("visit_id").isNull()
+    ).where(
+        f.col("omop_table") != "person"
+    ).crossJoin(
+        max_visit_id_df
+    ).withColumn(
+        "new_visit_id",
+        f.dense_rank().over(
+            Window.orderBy(f.col("patient_id"), f.col("start").cast(t.DateType()))
+        ).cast(t.LongType()) + f.col("max_visit_id").cast(t.LongType())
+    ).drop(
+        "visit_id"
+    )
+    orphan_records.groupby("new_visit_id").agg(
+        f.countDistinct("patient_id").alias("pat_count")
+    ).select(
+        f.assert_true(f.col("pat_count") == 1)
+    ).collect()
+
+    # Link the artificial visit_ids back to the domain_records
+    domain_records = domain_records.alias("domain").join(
+        orphan_records.alias("orphan").select(
+            f.col("orphan.record_id"),
+            f.col("orphan.new_visit_id"),
+        ),
+        f.col("domain.record_id") == f.col("orphan.record_id"),
+        "left_outer"
+    ).withColumn(
+        "update_visit_id",
+        f.coalesce(f.col("orphan.new_visit_id"), f.col("domain.visit_id"))
+    ).select(
+        [
+            f.col("domain." + field).alias(field)
+            for field in domain_records.schema.fieldNames() if not field.endswith("visit_id")
+        ] + [f.col("update_visit_id").alias("visit_id")]
+    ).drop(
+        "record_id"
+    )
+
+    # Generate the artificial visits
+    artificial_visits = orphan_records.groupBy("new_visit_id", "patient_id").agg(
+        f.min("start").alias("start"),
+        f.max("end").alias("end")
+    ).withColumn(
+        "code",
+        f.lit(0)
+    ).withColumn(
+        "value",
+        f.lit(None).cast(t.StringType())
+    ).withColumn(
+        "unit",
+        f.lit(None).cast(t.StringType())
+    ).withColumn(
+        "omop_table",
+        f.lit("visit_occurrence")
+    ).withColumnRenamed(
+        "new_visit_id", "visit_id"
+    ).drop("record_id")
+
+    # Drop visit_start_date and visit_end_date
+    real_visits = real_visits.drop("visit_start_date", "visit_end_date")
 
     # Validate the uniqueness of visit_id
-    visit.groupby("new_visit_id").count().select(f.assert_true(f.col("count") == 1))
+    artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1)).collect()
     # Join the generated visit_id back to data
-    return data.join(
-        visit,
-        on=["patient_id", "visit_order"],
-        how="left_outer"
-    ).withColumn(
-        "visit_id", f.coalesce(f.col("new_visit_id"), f.col("visit_id"))
-    ).drop("visit_order", "patient_event_order", "new_visit_id")
+    return domain_records.unionByName(
+        real_visits
+    ).unionByName(
+        artificial_visits
+    )
 
 
 def drop_duplicate_visits(data: DataFrame) -> DataFrame:
@@ -549,7 +645,10 @@ def main(args):
     if args.refresh_ehrshot or not os.path.exists(ehr_shot_path):
         ehr_shot_data = spark.read.option("header", "true").schema(get_schema()).csv(
             args.ehr_shot_file
-        )
+        ).withColumn(
+            "visit_id",
+            f.col("visit_id").cast(t.LongType())
+        ).drop("_c0")
         # Add visit_id based on the time intervals between neighboring events
         ehr_shot_data = generate_visit_id(
             ehr_shot_data
