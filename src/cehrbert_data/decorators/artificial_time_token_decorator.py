@@ -285,9 +285,12 @@ class AttEventDecorator(PatientEventDecorator):
             # Create ATT tokens within the inpatient visits
             inpatient_att_events = (
                 inpatient_events.withColumn(
+                  "time_stamp_hour", F.hour("datetime")
+                ).withColumn(
                     "is_span_boundary",
                     F.row_number().over(
-                        W.partitionBy("cohort_member_id", "visit_occurrence_id", "concept_order").orderBy("priority")
+                        W.partitionBy("cohort_member_id", "visit_occurrence_id", "concept_order")
+                        .orderBy("priority", "date", "time_stamp_hour")
                     ),
                 )
                 .where(F.col("is_span_boundary") == 1)
@@ -307,7 +310,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("unit", F.lit(NA))
                 .withColumn("event_group_id", F.lit(NA))
                 .drop("prev_date", "time_delta", "is_span_boundary")
-                .drop("prev_datetime", "hour_delta")
+                .drop("prev_datetime", "hour_delta", "time_stamp_hour")
             )
 
             # Insert the first hour tokens between the visit type and first medical event
