@@ -1,10 +1,10 @@
+import os.path
+
 from ..const.common import (
     MEASUREMENT,
     CATEGORICAL_MEASUREMENT,
-    MEASUREMENT_QUESTION_PREFIX,
-    MEASUREMENT_ANSWER_PREFIX
 )
-from pyspark.sql import DataFrame, functions as F, Window as W, types as T
+from pyspark.sql import SparkSession, DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
 from .token_priority import DEFAULT_PRIORITY
@@ -17,8 +17,12 @@ class ClinicalEventDecorator(PatientEventDecorator):
     #     'concept_value_masks', 'value_as_numbers', 'value_as_concepts', 'mlm_skip_values',
     #     'visit_concept_ids', "units"
     # ]
-    def __init__(self, visit_occurrence):
+    def __init__(self, visit_occurrence, spark: SparkSession = None, persistence_folder: str = None):
         self._visit_occurrence = visit_occurrence
+        super().__init__(spark=spark, persistence_folder=persistence_folder)
+
+    def get_name(self):
+        return "clinical_events"
 
     def _decorate(self, patient_events: DataFrame):
         """
@@ -144,5 +148,11 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         if "concept_as_value" not in patient_events.schema.fieldNames():
             patient_events = patient_events.withColumn("concept_as_value", F.lit(None).cast("string"))
+
+        # Try persisting the clinical events
+        patient_events = self.try_persist_data(
+            patient_events,
+            self.get_name()
+        )
 
         return patient_events

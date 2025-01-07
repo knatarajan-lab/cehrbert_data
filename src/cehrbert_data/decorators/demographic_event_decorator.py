@@ -1,4 +1,5 @@
-from pyspark.sql import DataFrame, functions as F, Window as W, types as T
+import os
+from pyspark.sql import SparkSession, DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
 
@@ -12,9 +13,18 @@ from .token_priority import (
 
 
 class DemographicEventDecorator(PatientEventDecorator):
-    def __init__(self, patient_demographic, use_age_group: bool = False):
+    def __init__(
+            self, patient_demographic,
+            use_age_group: bool = False,
+            spark: SparkSession = None,
+            persistence_folder: str = None
+    ):
         self._patient_demographic = patient_demographic
         self._use_age_group = use_age_group
+        super().__init__(spark=spark, persistence_folder=persistence_folder)
+
+    def get_name(self):
+        return "demographic_events"
 
     def _decorate(self, patient_events: DataFrame):
         if self._patient_demographic is None:
@@ -63,7 +73,10 @@ class DemographicEventDecorator(PatientEventDecorator):
             .withColumn("concept_order", F.lit(0))
         )
 
-        sequence_start_year_token.cache()
+        # Try persisting the start year tokens
+        sequence_start_year_token = self.try_persist_data(
+            sequence_start_year_token, os.path.join(self.get_name(), "sequence_start_year_tokens")
+        )
 
         if self._use_age_group:
             calculate_age_group_at_first_visit_udf = F.ceil(
@@ -89,6 +102,11 @@ class DemographicEventDecorator(PatientEventDecorator):
             .drop("birth_datetime")
         )
 
+        # Try persisting the age tokens
+        sequence_age_token = self.try_persist_data(
+            sequence_age_token, os.path.join(self.get_name(), "sequence_age_tokens")
+        )
+
         sequence_gender_token = (
             self._patient_demographic.select(F.col("person_id"), F.col("gender_concept_id"))
             .join(sequence_start_year_token, "person_id")
@@ -97,12 +115,22 @@ class DemographicEventDecorator(PatientEventDecorator):
             .drop("gender_concept_id")
         )
 
+        # Try persisting the gender tokens
+        sequence_gender_token = self.try_persist_data(
+            sequence_gender_token, os.path.join(self.get_name(), "sequence_gender_tokens")
+        )
+
         sequence_race_token = (
             self._patient_demographic.select(F.col("person_id"), F.col("race_concept_id"))
             .join(sequence_start_year_token, "person_id")
             .withColumn("standard_concept_id", F.coalesce(F.col("race_concept_id"), F.lit(0)).cast(T.StringType()))
             .withColumn("priority", F.lit(RACE_TOKEN_PRIORITY))
             .drop("race_concept_id")
+        )
+
+        # Try persisting the race tokens
+        sequence_race_token = self.try_persist_data(
+            sequence_race_token, os.path.join(self.get_name(), "sequence_race_tokens")
         )
 
         patient_events = patient_events.unionByName(sequence_start_year_token)

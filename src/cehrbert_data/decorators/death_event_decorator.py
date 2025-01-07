@@ -1,4 +1,5 @@
-from pyspark.sql import DataFrame, functions as F, Window as W, types as T
+import os
+from pyspark.sql import SparkSession, DataFrame, functions as F, Window as W, types as T
 
 from ..const.common import NA
 from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN, DEATH_TOKEN
@@ -20,9 +21,13 @@ from .token_priority import (
 
 
 class DeathEventDecorator(PatientEventDecorator):
-    def __init__(self, death, att_type):
+    def __init__(self, death, att_type, spark: SparkSession = None, persistence_folder: str = None):
         self._death = death
         self._att_type = att_type
+        super().__init__(spark=spark, persistence_folder=persistence_folder)
+
+    def get_name(self):
+        return "death_tokens"
 
     def _decorate(self, patient_events: DataFrame):
         if self._death is None:
@@ -32,7 +37,7 @@ class DeathEventDecorator(PatientEventDecorator):
 
         max_visit_occurrence_id = death_records.select(F.max("visit_occurrence_id").alias("max_visit_occurrence_id"))
 
-        last_ve_record = (
+        last_ve_events = (
             death_records.where(F.col("standard_concept_id") == VE_TOKEN)
             .withColumn(
                 "record_rank",
@@ -42,7 +47,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .drop("record_rank")
         )
 
-        last_ve_record.cache()
+        last_ve_events.cache()
         # set(['cohort_member_id', 'person_id', 'standard_concept_id', 'date',
         #      'visit_occurrence_id', 'domain', 'concept_value', 'visit_rank_order',
         #      'visit_segment', 'priority', 'date_in_week', 'concept_value_mask',
@@ -52,7 +57,7 @@ class DeathEventDecorator(PatientEventDecorator):
         ) + F.col("max_visit_occurrence_id")
 
         death_records = (
-            last_ve_record.crossJoin(max_visit_occurrence_id)
+            last_ve_events.crossJoin(max_visit_occurrence_id)
             .withColumn("visit_occurrence_id", artificial_visit_id)
             .withColumn("standard_concept_id", F.lit(DEATH_TOKEN))
             .withColumn("domain", F.lit("death"))
@@ -107,6 +112,10 @@ class DeathEventDecorator(PatientEventDecorator):
 
         new_tokens = death_events.unionByName(vs_records).unionByName(death_records).unionByName(ve_records)
         new_tokens = new_tokens.drop("death_date")
+        new_tokens = self.try_persist_data(
+            new_tokens,
+            os.path.join(self.get_name(), "death_events")
+        )
         self.validate(new_tokens)
 
         return patient_events.unionByName(new_tokens)

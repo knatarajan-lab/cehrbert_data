@@ -195,7 +195,9 @@ def main(args):
             inpatient_att_type=AttType(args.inpatient_att_type),
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group,
-            include_inpatient_hour_token=args.include_inpatient_hour_token
+            include_inpatient_hour_token=args.include_inpatient_hour_token,
+            spark=spark,
+            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(

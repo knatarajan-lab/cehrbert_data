@@ -669,6 +669,8 @@ def create_sequence_data_with_att(
         exclude_demographic: bool = True,
         use_age_group: bool = False,
         include_inpatient_hour_token: bool = False,
+        spark: SparkSession = None,
+        persistence_folder: str = None,
 ):
     """
     Create a sequence of the events associated with one patient in a chronological order.
@@ -685,6 +687,8 @@ def create_sequence_data_with_att(
     :param exclude_demographic:
     :param use_age_group:
     :param include_inpatient_hour_token:
+    :param spark: SparkSession
+    :param persistence_folder: persistence folder for the temp data frames
 
     :return:
     """
@@ -692,7 +696,7 @@ def create_sequence_data_with_att(
         patient_events = patient_events.where(F.col("date").cast("date") >= date_filter)
 
     decorators = [
-        ClinicalEventDecorator(visit_occurrence),
+        ClinicalEventDecorator(visit_occurrence, spark=spark, persistence_folder=persistence_folder),
         AttEventDecorator(
             visit_occurrence,
             include_visit_type,
@@ -700,12 +704,21 @@ def create_sequence_data_with_att(
             att_type,
             inpatient_att_type,
             include_inpatient_hour_token,
+            spark=spark,
+            persistence_folder=persistence_folder
         ),
-        DeathEventDecorator(death, att_type),
+        DeathEventDecorator(death, att_type, spark=spark, persistence_folder=persistence_folder),
     ]
 
     if not exclude_demographic:
-        decorators.append(DemographicEventDecorator(patient_demographic, use_age_group))
+        decorators.append(
+            DemographicEventDecorator(
+                patient_demographic,
+                use_age_group,
+                spark=spark,
+                persistence_folder=persistence_folder
+            )
+        )
 
     for decorator in decorators:
         patient_events = decorator.decorate(patient_events)

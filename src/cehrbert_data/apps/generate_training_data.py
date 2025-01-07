@@ -173,6 +173,8 @@ def main(
             exclude_demographic=exclude_demographic,
             use_age_group=use_age_group,
             include_inpatient_hour_token=include_inpatient_hour_token,
+            spark=spark,
+            persistence_folder=output_folder,
         )
     else:
         sequence_data = create_sequence_data(

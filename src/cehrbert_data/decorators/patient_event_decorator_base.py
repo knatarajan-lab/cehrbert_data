@@ -1,10 +1,11 @@
+import os
 import math
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Union, Set, Callable
 
 import numpy as np
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 
 
 class AttType(Enum):
@@ -17,14 +18,35 @@ class AttType(Enum):
 
 
 class PatientEventDecorator(ABC):
+    def __init__(self, spark: SparkSession = None, persistence_folder: str = None,):
+        self.spark = spark
+        self.persistence_folder = persistence_folder
+
     @abstractmethod
     def _decorate(self, patient_events):
+        pass
+
+    @abstractmethod
+    def get_name(self):
         pass
 
     def decorate(self, patient_events):
         decorated_patient_events = self._decorate(patient_events)
         self.validate(decorated_patient_events)
         return decorated_patient_events
+
+    def try_persist_data(self, data: DataFrame, folder_name: str) -> DataFrame:
+        if self.persistence_folder and self.spark:
+            temp_folder = os.path.join(self.persistence_folder, folder_name)
+            data.write.mode("overwrite").parquet(temp_folder)
+            return self.spark.read.parquet(temp_folder)
+        return data
+
+    def load_recursive(self) -> Optional[DataFrame]:
+        if self.persistence_folder and self.spark:
+            temp_folder = os.path.join(self.persistence_folder, self.get_name())
+            return self.spark.read.option("recursiveFileLookup", "true").parquet(temp_folder)
+        return None
 
     @classmethod
     def get_required_columns(cls) -> Set[str]:
