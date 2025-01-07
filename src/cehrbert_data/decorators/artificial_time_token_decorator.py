@@ -293,7 +293,6 @@ class AttEventDecorator(PatientEventDecorator):
                         .orderBy("priority", "date", "time_stamp_hour")
                     ),
                 )
-                .where(F.col("is_span_boundary") == 1)
                 .withColumn("prev_date", inpatient_prev_date_udf)
                 .withColumn("time_delta", inpatient_time_delta_udf)
                 .withColumn("prev_datetime", inpatient_prev_datetime_udf)
