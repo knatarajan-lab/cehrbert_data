@@ -174,7 +174,7 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
                 filtered_domain_table["person_id"],
                 filtered_domain_table[concept_id_field].alias("standard_concept_id"),
                 filtered_domain_table["date"].cast("date"),
-                filtered_domain_table["datetime"],
+                filtered_domain_table["datetime"].cast(T.TimestampType()),
                 filtered_domain_table["visit_occurrence_id"],
                 F.lit(table_domain_field).alias("domain"),
                 F.lit(None).cast("string").alias("event_group_id"),

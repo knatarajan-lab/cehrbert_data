@@ -96,10 +96,12 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         # We need to set the visit_start_datetime at the beginning of the visit start date
         # because there could be outpatient visit records whose visit_start_datetime is set to the end of the day
-        visit_start_datetime_udf = F.when(
-            F.col("is_inpatient") == 0,
-            F.col("visit_start_date").cast(T.TimestampType())
-        ).otherwise(F.col("visit_start_datetime"))
+        visit_start_datetime_udf = (
+            F.when(
+                F.col("is_inpatient") == 0,
+                F.col("visit_start_date")
+            ).otherwise(F.col("visit_start_datetime"))
+        ).cast(T.TimestampType())
 
         # We need to bound the medical event dates between visit_start_date and visit_end_date
         bound_medical_event_date = F.when(
@@ -119,9 +121,10 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         patient_events = (
             patient_events.join(visits, ["cohort_member_id", "visit_occurrence_id"])
+            .withColumn("datetime", F.to_timestamp("datetime"))
             .withColumn("visit_start_datetime", visit_start_datetime_udf)
             .withColumn("visit_end_date", visit_end_date_udf)
-            .withColumn("visit_end_datetime", F.date_add("visit_end_date", 1))
+            .withColumn("visit_end_datetime", F.date_add("visit_end_date", 1).cast(T.TimestampType()))
             .withColumn("visit_end_datetime", F.expr("visit_end_datetime - INTERVAL 1 MINUTE"))
             .withColumn("date", bound_medical_event_date)
             .withColumn("datetime", bound_medical_event_datetime)
