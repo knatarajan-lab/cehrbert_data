@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 from enum import Enum
 
+from pyarrow import TimestampType
 from pyspark.sql import SparkSession
 from pyspark.sql import types as t
 from pyspark.sql import functions as f
@@ -122,15 +123,21 @@ def main(args):
         cohort.select("person_id").distinct(),
         "person_id"
     ).withColumn(
+        "visit_start_date",
+        f.col("visit_start_date").cast(t.DateType())
+    ).withColumn(
         "visit_end_date",
-        f.coalesce(f.col("visit_end_date"), f.col("visit_start_date"))
+        f.coalesce(f.col("visit_end_date"), f.col("visit_start_date")).cast(t.DateType())
+    ).withColumn(
+        "visit_start_datetime",
+        f.col("visit_start_datetime").cast(t.TimestampType())
     ).withColumn(
         "visit_end_datetime",
         f.coalesce(
             f.col("visit_end_datetime"),
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
-        )
+        ).cast(t.TimestampType())
     )
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
@@ -138,7 +145,6 @@ def main(args):
         cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
             "order", f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
         )
-
         visit_index_date = cohort_visit_occurrence.alias("visit").join(
             cohort.alias("cohort"),
             "person_id"
@@ -159,7 +165,7 @@ def main(args):
             f.coalesce(f.col("index_date").cast(t.DateType()), f.col("visit_end_date"))
         ).withColumn(
             "visit_end_datetime",
-            f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
+            f.coalesce(f.col("index_date"), f.col("visit_end_datetime")).cast(t.TimestampType())
         ).orderBy(f.col("order")).drop("order")
 
     birthdate_udf = f.coalesce(
