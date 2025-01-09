@@ -689,14 +689,17 @@ def main(args):
         inferred_inpatient_visits = outpatient_visit_start_end.where("inpatient_indicator = 1").select(
             "visit_id", "start", "end", f.lit("Visit/IP").alias("code"),
         )
-        ehr_shot_data = ehr_shot_data.join(
-            inferred_inpatient_visits, "visit_id", "left_outer"
-        ).withColumn(
-            "start", f.coalesce(inferred_inpatient_visits["start"], ehr_shot_data["start"])
-        ).withColumn(
-            "end", f.coalesce(inferred_inpatient_visits["end"], ehr_shot_data["end"])
-        ).withColumn(
-            "code", f.coalesce(inferred_inpatient_visits["code"], ehr_shot_data["code"])
+        ehr_shot_data = ehr_shot_data.alias("ehr").join(
+            inferred_inpatient_visits.alias("visits"), "visit_id", "left_outer"
+        ).select(
+            f.col("ehr.patient_id").alias("patient_id"),
+            f.coalesce(f.col("visits.start"), f.col("ehr.start")).alias("start"),
+            f.coalesce(f.col("visits.end"), f.col("ehr.end")).alias("end"),
+            f.coalesce(f.col("visits.code"), f.col("ehr.code")).alias("code"),
+            f.col("ehr.value").alias("value"),
+            f.col("ehr.unit").alias("unit"),
+            f.col("ehr.omop_table").alias("omop_table"),
+            f.col("ehr.visit_id").alias("visit_id"),
         )
         ehr_shot_data.write.mode("overwrite").parquet(ehr_shot_path)
 
