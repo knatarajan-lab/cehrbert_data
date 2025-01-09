@@ -469,9 +469,9 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         "visit_end_date",
         f.coalesce(f.col("end").cast(t.DateType()), f.col("visit_start_date"))
     )
-    real_visits_records = os.path.join(visit_reconstruction_folder, "real_visits")
-    real_visits.write.mode("overwrite").parquet(real_visits_records)
-    real_visits = spark.read.parquet(real_visits_records)
+    real_visits_folder = os.path.join(visit_reconstruction_folder, "real_visits")
+    real_visits.write.mode("overwrite").parquet(real_visits_folder)
+    real_visits = spark.read.parquet(real_visits_folder)
     # Getting the records that do not have a visit_id
     domain_records = data.where(
         f.col("omop_table") != "visit_occurrence"
