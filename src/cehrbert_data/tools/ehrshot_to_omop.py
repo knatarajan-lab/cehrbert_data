@@ -418,7 +418,7 @@ def convert_code_to_omop_concept(
     ).select(output_columns)
 
 
-def generate_visit_id(data: DataFrame, cache_folder: str) -> DataFrame:
+def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -> DataFrame:
     """
      Generates unique `visit_id`s for each visit based on distinct patient event records.
 
@@ -436,6 +436,8 @@ def generate_visit_id(data: DataFrame, cache_folder: str) -> DataFrame:
          - `end`: (Optional) End timestamp of the event.
          - `omop_table`: String specifying the type of event (e.g., "visit_occurrence" for real visits).
          - `visit_id`: (Optional) Identifier for visits. May be missing in some records.
+     spark: SparkSession
+        The current spark session
      cache_folder: str
         The cache folder for saving the intermediate dataframes
 
@@ -467,8 +469,9 @@ def generate_visit_id(data: DataFrame, cache_folder: str) -> DataFrame:
         "visit_end_date",
         f.coalesce(f.col("end").cast(t.DateType()), f.col("visit_start_date"))
     )
-    real_visits.write.mode("overwrite").parquet(os.path.join(visit_reconstruction_folder, "real_visits"))
-
+    real_visits_records = os.path.join(visit_reconstruction_folder, "real_visits")
+    real_visits.write.mode("overwrite").parquet(real_visits_records)
+    real_visits = spark.read.parquet(real_visits_records)
     # Getting the records that do not have a visit_id
     domain_records = data.where(
         f.col("omop_table") != "visit_occurrence"
@@ -478,7 +481,9 @@ def generate_visit_id(data: DataFrame, cache_folder: str) -> DataFrame:
     )
 
     # This is important to have a deterministic behavior for generating record_id
-    domain_records.cache()
+    temp_domain_records_folder = os.path.join(visit_reconstruction_folder, "temp_domain_records")
+    domain_records.write.mode("overwrite").parquet(temp_domain_records_folder)
+    domain_records = spark.read.parquet(temp_domain_records_folder)
 
     # Invalidate visit_id if the record's time stamp falls outside the visit start/end
     domain_records = domain_records.alias("domain").join(
@@ -582,7 +587,9 @@ def generate_visit_id(data: DataFrame, cache_folder: str) -> DataFrame:
         "new_visit_id", "visit_id"
     ).drop("record_id")
 
-    artificial_visits.write.mode("overwrite").parquet(os.path.join(visit_reconstruction_folder, "artificial_visits"))
+    artificial_visits_folder = os.path.join(visit_reconstruction_folder, "artificial_visits")
+    artificial_visits.write.mode("overwrite").parquet(artificial_visits_folder)
+    artificial_visits = spark.read.parquet(artificial_visits_folder)
 
     # Drop visit_start_date and visit_end_date
     real_visits = real_visits.drop("visit_start_date", "visit_end_date")
@@ -658,6 +665,7 @@ def main(args):
         # Add visit_id based on the time intervals between neighboring events
         ehr_shot_data = generate_visit_id(
             ehr_shot_data,
+            spark,
             args.output_folder,
         )
         outpatient_visits = ehr_shot_data.where(
