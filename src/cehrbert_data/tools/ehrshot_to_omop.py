@@ -418,7 +418,7 @@ def convert_code_to_omop_concept(
     ).select(output_columns)
 
 
-def generate_visit_id(data: DataFrame) -> DataFrame:
+def generate_visit_id(data: DataFrame, cache_folder: str) -> DataFrame:
     """
      Generates unique `visit_id`s for each visit based on distinct patient event records.
 
@@ -436,6 +436,8 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
          - `end`: (Optional) End timestamp of the event.
          - `omop_table`: String specifying the type of event (e.g., "visit_occurrence" for real visits).
          - `visit_id`: (Optional) Identifier for visits. May be missing in some records.
+     cache_folder: str
+        The cache folder for saving the intermediate dataframes
 
      Returns
      -------
@@ -454,6 +456,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
      4. **Create Artificial Visits**: Generates artificial visit records for orphan `visit_id`s.
      5. **Merge and Validate**: Combines the original records with artificial visits and validates the uniqueness of each `visit_id`.
      """
+    visit_reconstruction_folder = os.path.join(cache_folder, "visit_reconstruction")
     data = data.repartition(16)
     real_visits = data.where(
         f.col("omop_table") == "visit_occurrence"
@@ -464,6 +467,7 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         "visit_end_date",
         f.coalesce(f.col("end").cast(t.DateType()), f.col("visit_start_date"))
     )
+    real_visits.write.mode("overwrite").parquet(os.path.join(visit_reconstruction_folder, "real_visits"))
 
     # Getting the records that do not have a visit_id
     domain_records = data.where(
@@ -578,6 +582,8 @@ def generate_visit_id(data: DataFrame) -> DataFrame:
         "new_visit_id", "visit_id"
     ).drop("record_id")
 
+    artificial_visits.write.mode("overwrite").parquet(os.path.join(visit_reconstruction_folder, "artificial_visits"))
+
     # Drop visit_start_date and visit_end_date
     real_visits = real_visits.drop("visit_start_date", "visit_end_date")
 
@@ -651,7 +657,38 @@ def main(args):
         ).drop("_c0")
         # Add visit_id based on the time intervals between neighboring events
         ehr_shot_data = generate_visit_id(
-            ehr_shot_data
+            ehr_shot_data,
+            args.output_folder,
+        )
+        outpatient_visits = ehr_shot_data.where(
+            "code not in ('Visit/IP', 'Visit/ERIP') and omop_table = 'visit_occurrence'"
+        )
+        # We don't use the end column to get the max end because some end datetime could be years apart from the start date
+        outpatient_visit_start_end = ehr_shot_data.join(outpatient_visits.select("visit_id"), "visit_id").where(
+            "omop_table in ('condition_occurrence', 'procedure_occurrence', 'drug_exposure', 'measurement')"
+        ).groupby("visit_id").agg(f.min("start").alias("start"), f.max("start").alias("end")).withColumn(
+            "hour_diff", (f.unix_timestamp("end") - f.unix_timestamp("start")) / 3600
+        ).withColumn(
+            "inpatient_indicator",
+            (f.col("hour_diff") > 24).cast("int")
+        )
+        # Reload it from the disk to update the dataframe
+        outpatient_visit_start_end_folder = os.path.join(args.output_folder, "outpatient_visit_start_end")
+        outpatient_visit_start_end.write.mode("overwrite").parquet(
+            outpatient_visit_start_end_folder
+        )
+        outpatient_visit_start_end = spark.read.parquet(outpatient_visit_start_end_folder)
+        inferred_inpatient_visits = outpatient_visit_start_end.where("inpatient_indicator = 1").select(
+            "visit_id", "start", "end", f.lit("Visit/IP").alias("code"),
+        )
+        ehr_shot_data = ehr_shot_data.join(
+            inferred_inpatient_visits, "visit_id", "left_outer"
+        ).withColumn(
+            "start", f.coalesce(outpatient_visit_start_end["start"], ehr_shot_data["start"])
+        ).withColumn(
+            "end", f.coalesce(outpatient_visit_start_end["end"], ehr_shot_data["end"])
+        ).withColumn(
+            "code", f.coalesce(outpatient_visit_start_end["code"], ehr_shot_data["code"])
         )
         ehr_shot_data.write.mode("overwrite").parquet(ehr_shot_path)
 
