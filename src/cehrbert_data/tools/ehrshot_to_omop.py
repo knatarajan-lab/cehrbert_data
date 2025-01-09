@@ -693,8 +693,14 @@ def main(args):
             inferred_inpatient_visits.alias("visits"), "visit_id", "left_outer"
         ).select(
             f.col("ehr.patient_id").alias("patient_id"),
-            f.coalesce(f.col("visits.start"), f.col("ehr.start")).alias("start"),
-            f.coalesce(f.col("visits.end"), f.col("ehr.end")).alias("end"),
+            f.when(
+                f.col("ehr.omop_table") == "visit_occurrence",
+                f.coalesce(f.col("visits.start"), f.col("ehr.start")),
+            ).otherwise(f.col("ehr.start")).alias("start"),
+            f.when(
+                f.col("ehr.omop_table") == "visit_occurrence",
+                f.coalesce(f.col("visits.end"), f.col("ehr.end")),
+            ).otherwise(f.col("ehr.end")).alias("end"),
             f.when(
                 f.col("ehr.omop_table") == "visit_occurrence",
                 f.coalesce(f.col("visits.code"), f.col("ehr.code")),
