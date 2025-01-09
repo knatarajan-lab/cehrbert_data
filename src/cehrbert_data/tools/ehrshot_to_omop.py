@@ -692,11 +692,11 @@ def main(args):
         ehr_shot_data = ehr_shot_data.join(
             inferred_inpatient_visits, "visit_id", "left_outer"
         ).withColumn(
-            "start", f.coalesce(outpatient_visit_start_end["start"], ehr_shot_data["start"])
+            "start", f.coalesce(inferred_inpatient_visits["start"], ehr_shot_data["start"])
         ).withColumn(
-            "end", f.coalesce(outpatient_visit_start_end["end"], ehr_shot_data["end"])
+            "end", f.coalesce(inferred_inpatient_visits["end"], ehr_shot_data["end"])
         ).withColumn(
-            "code", f.coalesce(outpatient_visit_start_end["code"], ehr_shot_data["code"])
+            "code", f.coalesce(inferred_inpatient_visits["code"], ehr_shot_data["code"])
         )
         ehr_shot_data.write.mode("overwrite").parquet(ehr_shot_path)
 
