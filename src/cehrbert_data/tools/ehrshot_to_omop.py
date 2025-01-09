@@ -695,7 +695,10 @@ def main(args):
             f.col("ehr.patient_id").alias("patient_id"),
             f.coalesce(f.col("visits.start"), f.col("ehr.start")).alias("start"),
             f.coalesce(f.col("visits.end"), f.col("ehr.end")).alias("end"),
-            f.coalesce(f.col("visits.code"), f.col("ehr.code")).alias("code"),
+            f.when(
+                f.col("ehr.omop_table") == "visit_occurrence",
+                f.coalesce(f.col("visits.code"), f.col("ehr.code")),
+            ).otherwise(f.col("ehr.code")).alias("code"),
             f.col("ehr.value").alias("value"),
             f.col("ehr.unit").alias("unit"),
             f.col("ehr.omop_table").alias("omop_table"),
