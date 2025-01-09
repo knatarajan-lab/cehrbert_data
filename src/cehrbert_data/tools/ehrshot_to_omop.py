@@ -661,11 +661,11 @@ def main(args):
             args.output_folder,
         )
         outpatient_visits = ehr_shot_data.where(
-            "code not in ('Visit/IP', 'Visit/ERIP') and omop_table = 'visit_occurrence'"
-        )
+            ~f.col("code").isin(["Visit/IP", "Visit/ERIP"])
+        ).where(f.col("omop_table") == "visit_occurrence")
         # We don't use the end column to get the max end because some end datetime could be years apart from the start date
         outpatient_visit_start_end = ehr_shot_data.join(outpatient_visits.select("visit_id"), "visit_id").where(
-            "omop_table in ('condition_occurrence', 'procedure_occurrence', 'drug_exposure', 'measurement')"
+            f.col("omop_table").isin(["condition_occurrence", "procedure_occurrence", "drug_exposure", "measurement"])
         ).groupby("visit_id").agg(f.min("start").alias("start"), f.max("start").alias("end")).withColumn(
             "hour_diff", (f.unix_timestamp("end") - f.unix_timestamp("start")) / 3600
         ).withColumn(
