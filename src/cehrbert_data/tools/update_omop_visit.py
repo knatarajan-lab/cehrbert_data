@@ -34,7 +34,7 @@ def main(args):
             omop_table.write.mode("overwrite").parquet(os.path.join(args.output_folder, omop_table_name))
 
     vocabulary_table: str
-    for vocabulary_table in VOCABULARY_TABLES:
+    for vocabulary_table in VOCABULARY_TABLES + ["person"]:
         if not os.path.exists(os.path.join(args.output_folder, vocabulary_table)):
             shutil.copytree(
                 os.path.join(args.vocabulary_folder, vocabulary_table),
