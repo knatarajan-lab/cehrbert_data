@@ -12,7 +12,7 @@ def main(args):
     )
     omop_table_name: str
     for omop_table_name in table_mapping.keys():
-        if omop_table_name != "visit_occurrence":
+        if omop_table_name not in ["visit_occurrence", "death"]:
             omop_table = spark.read.parquet(os.path.join(args.input_folder, omop_table_name))
             omop_table.alias("domain").join(
                 visit_mapping.alias("visit"),
