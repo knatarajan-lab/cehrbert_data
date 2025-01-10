@@ -121,6 +121,7 @@ def step_3_consolidate_outpatient_visits(
         spark: SparkSession,
         visit_occurrence: DataFrame,
         output_folder: str,
+        outpatient_hour_diff_threshold: int
 ) -> Tuple[DataFrame, DataFrame]:
     # We need to connect the visits together
     workspace_folder = os.path.join(output_folder, "outpatient_visit_workspace")
@@ -135,9 +136,9 @@ def step_3_consolidate_outpatient_visits(
         spark=spark,
         visit_to_fix=outpatient_visit,
         visit_occurrence=visit_occurrence,
-        hour_diff_threshold=24,
+        hour_diff_threshold=outpatient_hour_diff_threshold,
         workspace_folder=workspace_folder,
-        visit_name="inpatient_visit",
+        visit_name="outpatient",
     )
     return visit_occurrence_outpatient_visit_fixed, outpatient_visit_mapping
 
@@ -146,6 +147,7 @@ def step_1_consolidate_inpatient_visits(
         spark: SparkSession,
         visit_occurrence: DataFrame,
         output_folder: str,
+        inpatient_hour_diff_threshold: int
 ) -> Tuple[DataFrame, DataFrame]:
     # We need to connect the visits together
     workspace_folder = os.path.join(output_folder, "inpatient_visit_workspace")
@@ -160,9 +162,9 @@ def step_1_consolidate_inpatient_visits(
         spark=spark,
         visit_to_fix=inpatient_visits,
         visit_occurrence=visit_occurrence,
-        hour_diff_threshold=24,
+        hour_diff_threshold=inpatient_hour_diff_threshold,
         workspace_folder=workspace_folder,
-        visit_name="inpatient_visit",
+        visit_name="inpatient",
     )
     return visit_occurrence_inpatient_visit_fixed, inpatient_visit_mapping
 
@@ -227,13 +229,21 @@ def main(args):
     spark = SparkSession.builder.appName("Clean up visit_occurrence").getOrCreate()
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     visit_occurrence_step_1, in_to_in_visit_mapping = step_1_consolidate_inpatient_visits(
-        spark, visit_occurrence, output_folder=args.output_folder
+        spark,
+        visit_occurrence,
+        output_folder=args.output_folder,
+        inpatient_hour_diff_threshold=args.inpatient_hour_diff_threshold,
     )
     visit_occurrence_step_2, out_to_in_visit_mapping = step_2_connect_outpatient_to_inpatient(
-        spark, visit_occurrence_step_1, output_folder=args.output_folder
+        spark,
+        visit_occurrence_step_1,
+        output_folder=args.output_folder,
     )
     visit_occurrence_step_3, out_to_out_visit_mapping = step_3_consolidate_outpatient_visits(
-        spark, visit_occurrence_step_2, output_folder=args.output_folder
+        spark,
+        visit_occurrence_step_2,
+        output_folder=args.output_folder,
+        outpatient_hour_diff_threshold=args.outpatient_hour_diff_threshold,
     )
     visit_occurrence_step_3.write.mode("overwrite").parquet(os.path.join(args.output_folder, "visit_occurrence"))
     mapping_columns = ["visit_occurrence_id", "master_visit_occurrence_id"]
@@ -256,6 +266,22 @@ if __name__ == "__main__":
         dest="output_folder",
         action="store",
         required=True,
+    )
+    parser.add_argument(
+        "--inpatient_hour_diff_threshold",
+        dest="inpatient_hour_diff_threshold",
+        action="store",
+        type=int,
+        default=24,
+        required=False,
+    )
+    parser.add_argument(
+        "--outpatient_hour_diff_threshold",
+        dest="outpatient_hour_diff_threshold",
+        action="store",
+        type=int,
+        default=1,
+        required=False,
     )
     main(
         parser.parse_args()
