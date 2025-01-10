@@ -1,26 +1,12 @@
 import os
-import logging
 import argparse
-from typing import Tuple
 
-from cehrbert_data.utils.logging_utils import add_console_logging
 from cehrbert_data.tools.ehrshot_to_omop import table_mapping
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import types as t
+from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
-from pyspark.sql.window import Window
-
-# Enable logging
-add_console_logging()
-logger = logging.getLogger(__name__)
-
 
 def main(args):
     spark = SparkSession.builder.appName("Clean up visit_occurrence").getOrCreate()
-    logger.info(
-        f"ehr_shot_file: {args.ehr_shot_file}\n"
-        f"output_folder: {args.output_folder}\n"
-    )
     visit_mapping = spark.read.parquet(
         os.path.join(args.output_folder, "visit_mapping")
     )

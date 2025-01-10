@@ -1,18 +1,11 @@
 import os
-import logging
 import argparse
 from typing import Tuple
-
-from cehrbert_data.utils.logging_utils import add_console_logging
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import types as t
 from pyspark.sql import functions as f
 from pyspark.sql.window import Window
-
-# Enable logging
-add_console_logging()
-logger = logging.getLogger(__name__)
 
 
 def connect_visits_in_chronological_order(
@@ -232,10 +225,6 @@ def step_2_connect_outpatient_to_inpatient(
 
 def main(args):
     spark = SparkSession.builder.appName("Clean up visit_occurrence").getOrCreate()
-    logger.info(
-        f"ehr_shot_file: {args.ehr_shot_file}\n"
-        f"output_folder: {args.output_folder}\n"
-    )
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     visit_occurrence_step_1, in_to_in_visit_mapping = step_1_consolidate_inpatient_visits(
         spark, visit_occurrence, output_folder=args.output_folder
@@ -252,6 +241,7 @@ def main(args):
         out_to_in_visit_mapping.select(mapping_columns)
     ).unionByName(out_to_out_visit_mapping.select(mapping_columns))
     visit_mapping.write.mode("overwrite").parquet(os.path.join(args.output_folder, "visit_mapping"))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments for connecting OMOP visits in chronological order")
