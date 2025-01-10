@@ -2,6 +2,8 @@ import os
 import logging
 import argparse
 import shutil
+from typing import Tuple
+
 from cehrbert_data.utils.logging_utils import add_console_logging
 
 from pyspark.sql import SparkSession, DataFrame
@@ -604,6 +606,114 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
     )
 
 
+def connect_visits_in_chronological_order(
+        spark: SparkSession,
+        visit_to_fix: DataFrame,
+        visit_occurrence: DataFrame,
+        hour_diff_threshold: int,
+        workspace_folder: str,
+        visit_name: str
+):
+    visit_to_fix = visit_to_fix.withColumn(
+        "visit_end_datetime",
+        f.coalesce("visit_end_datetime", f.col("visit_end_date").cast(t.TimestampType()))
+    ).withColumn(
+        "visit_end_datetime",
+        f.when(
+            f.col("visit_end_datetime") > f.col("visit_start_datetime"), f.col("visit_end_datetime")
+        ).otherwise(f.col("visit_start_datetime"))
+    ).withColumn(
+        "visit_order",
+        f.row_number().over(
+            Window.partitionBy("person_id").orderBy("visit_start_datetime", "visit_occurrence_id")
+        )
+    ).withColumn(
+        "prev_visit_end_datetime",
+        f.lag("visit_end_datetime").over(
+            Window.partitionBy("person_id").orderBy("visit_order")
+        )
+    ).withColumn(
+        "hour_diff",
+        f.coalesce(
+            (f.unix_timestamp("visit_start_datetime") - f.unix_timestamp("prev_visit_end_datetime")) / 3600,
+            f.lit(0)
+        )
+    ).withColumn(
+        "visit_partition",
+        f.sum((f.col("hour_diff") > hour_diff_threshold).cast("int")).over(
+            Window.partitionBy("person_id").orderBy("visit_order")
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        )
+    ).withColumn(
+        "is_master_visit",
+        f.row_number().over(Window.partitionBy("person_id", "visit_partition").orderBy("visit_order")) == 1
+    )
+    visit_to_fix_folder = os.path.join(workspace_folder, f"{visit_name}_visit_to_fix")
+    visit_to_fix.write.mode("overwrite").parquet(visit_to_fix_folder)
+    visit_to_fix = spark.read.parquet(visit_to_fix_folder)
+    # Connect all the individual inpatient visits
+    master_visit = visit_to_fix.alias("in").join(
+        visit_to_fix.where(
+            f.col("is_master_visit")
+        ).alias("master"),
+        (f.col("in.person_id") == f.col("master.person_id"))
+        & (f.col("in.visit_partition") == f.col("master.visit_partition")),
+    ).groupby(
+        f.col("master.person_id").alias("person_id"),
+        f.col("master.visit_partition").alias("visit_partition"),
+        f.col("master.visit_occurrence_id").alias("visit_occurrence_id"),
+    ).agg(
+        f.min("in.visit_start_date").alias("visit_start_date"),
+        f.min("in.visit_start_datetime").alias("visit_start_datetime"),
+        f.max("in.visit_end_date").alias("visit_end_date"),
+        f.max("in.visit_end_datetime").alias("visit_end_datetime"),
+    )
+    master_visit_folder = os.path.join(workspace_folder, f"{visit_name}_master_visit")
+    master_visit.write.mode("overwrite").parquet(master_visit_folder)
+    master_visit = spark.read.parquet(master_visit_folder)
+    visit_mapping = master_visit.alias("master").join(
+        visit_to_fix.alias("in"),
+        (f.col("master.person_id") == f.col("in.person_id"))
+        & (f.col("master.visit_partition") == f.col("in.visit_partition")),
+    ).where(
+        f.col("master.visit_occurrence_id") != f.col("in.visit_occurrence_id")
+    ).select(
+        f.col("master.person_id").alias("person_id"),
+        f.col("master.visit_partition").alias("visit_partition"),
+        f.col("master.visit_occurrence_id").alias("master_visit_occurrence_id"),
+        f.col("in.visit_occurrence_id").alias("visit_occurrence_id"),
+    )
+    visit_mapping_folder = os.path.join(workspace_folder, f"{visit_name}_visit_mapping")
+    visit_mapping.write.mode("overwrite").parquet(visit_mapping_folder)
+    visit_mapping = spark.read.parquet(visit_mapping_folder)
+    # Update the visit_start_date(time) and visit_end_date(time)
+    columns_to_update = [
+        "visit_occurrence_id", "visit_start_date", "visit_end_date", "visit_start_datetime", "visit_end_datetime"
+    ]
+    other_columns = [column for column in visit_occurrence.columns if column not in columns_to_update]
+    visit_occurrence_fixed = visit_occurrence.alias("visit").join(
+        master_visit.alias("master"),
+        (f.col("master.visit_occurrence_id") == f.col("visit.visit_occurrence_id")),
+        "left_outer"
+    ).select(
+        [
+            f.coalesce(f.col(f"master.{column}"), f.col(f"visit.{column}")).alias(column)
+            for column in columns_to_update
+        ] + [
+            f.col(f"visit.{column}").alias(column)
+            for column in other_columns
+        ]
+    )
+    visit_occurrence_fixed = visit_occurrence_fixed.join(
+        visit_mapping.select("visit_occurrence_id"),
+        on="visit_occurrence_id",
+        how="left_anti"
+    )
+    visit_occurrence_fixed.write.mode("overwrite").parquet(
+        os.path.join(workspace_folder, f"{visit_name}_visit_occurrence_fixed")
+    )
+    return visit_occurrence_fixed, visit_mapping
+
 def drop_duplicate_visits(data: DataFrame) -> DataFrame:
     """
     Removes duplicate visits based on visit priority, retaining a single record per `visit_id`.
@@ -645,6 +755,118 @@ def drop_duplicate_visits(data: DataFrame) -> DataFrame:
         "priority"
     )
     return data
+
+
+def consolidate_inpatient_visits(spark: SparkSession, args) -> Tuple[DataFrame, DataFrame]:
+    # We need to connect the visits together
+    visit_occurrence = spark.read.parquet(os.path.join(args.output_folder, "visit_occurrence"))
+    visit_mapping_folder = os.path.join(args.output_folder, "visit_mapping")
+    inpatient_visits = visit_occurrence.where(
+        f.col("visit_concept_id").isin(9201, 262)
+    ).select(
+        "person_id", "visit_occurrence_id",
+        "visit_start_date", "visit_start_datetime",
+        "visit_end_date", "visit_end_datetime"
+    )
+    inpatient_visits = inpatient_visits.withColumn(
+        "visit_end_datetime",
+        f.coalesce("visit_end_datetime", f.col("visit_end_date").cast(t.TimestampType()))
+    ).withColumn(
+        "visit_end_datetime",
+        f.when(
+            f.col("visit_end_datetime") > f.col("visit_start_datetime"), f.col("visit_end_datetime")
+        ).otherwise(f.col("visit_start_datetime"))
+    ).withColumn(
+        "visit_order",
+        f.row_number().over(
+            Window.partitionBy("person_id").orderBy("visit_start_datetime", "visit_occurrence_id")
+        )
+    ).withColumn(
+        "prev_visit_end_datetime",
+        f.lag("visit_end_datetime").over(
+            Window.partitionBy("person_id").orderBy("visit_order")
+        )
+    ).withColumn(
+        "hour_diff",
+        f.coalesce(
+            (f.unix_timestamp("visit_start_datetime") - f.unix_timestamp("prev_visit_end_datetime")) / 3600,
+            f.lit(0)
+        )
+    ).withColumn(
+        "visit_partition",
+        f.sum((f.col("hour_diff") > 24).cast("int")).over(
+            Window.partitionBy("person_id").orderBy("visit_order")
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        )
+    ).withColumn(
+        "is_master_visit",
+        f.row_number().over(Window.partitionBy("person_id", "visit_partition").orderBy("visit_order")) == 1
+    )
+    inpatient_visits_folder = os.path.join(visit_mapping_folder, "inpatient_visits")
+    inpatient_visits.write.mode("overwrite").parquet(inpatient_visits_folder)
+    inpatient_visits = spark.read.parquet(inpatient_visits_folder)
+    # Connect all the individual inpatient visits
+    master_inpatient_visits = inpatient_visits.alias("in").join(
+        inpatient_visits.where(
+            f.col("is_master_visit")
+        ).alias("master"),
+        (f.col("in.person_id") == f.col("master.person_id"))
+        & (f.col("in.visit_partition") == f.col("master.visit_partition")),
+    ).groupby(
+        f.col("master.person_id").alias("person_id"),
+        f.col("master.visit_partition").alias("visit_partition"),
+        f.col("master.visit_occurrence_id").alias("visit_occurrence_id"),
+    ).agg(
+        f.min("in.visit_start_date").alias("visit_start_date"),
+        f.min("in.visit_start_datetime").alias("visit_start_datetime"),
+        f.max("in.visit_end_date").alias("visit_end_date"),
+        f.max("in.visit_end_datetime").alias("visit_end_datetime"),
+    )
+    master_inpatient_visits_folder = os.path.join(visit_mapping_folder, "master_inpatient_visits")
+    master_inpatient_visits.write.mode("overwrite").parquet(master_inpatient_visits_folder)
+    master_inpatient_visits = spark.read.parquet(master_inpatient_visits_folder)
+    inpatient_visit_mappings = master_inpatient_visits.alias("master").join(
+        inpatient_visits.alias("in"),
+        (f.col("master.person_id") == f.col("in.person_id"))
+        & (f.col("master.visit_partition") == f.col("in.visit_partition")),
+    ).where(
+        f.col("master.visit_occurrence_id") != f.col("in.visit_occurrence_id")
+    ).select(
+        f.col("master.person_id").alias("person_id"),
+        f.col("master.visit_partition").alias("visit_partition"),
+        f.col("master.visit_occurrence_id").alias("master_visit_occurrence_id"),
+        f.col("in.visit_occurrence_id").alias("visit_occurrence_id"),
+    )
+    inpatient_visit_mappings_folder = os.path.join(visit_mapping_folder, "inpatient_visit_mappings")
+    inpatient_visit_mappings.write.mode("overwrite").parquet(inpatient_visit_mappings_folder)
+    inpatient_visit_mappings = spark.read.parquet(inpatient_visit_mappings_folder)
+    # Update the visit_start_date(time) and visit_end_date(time)
+    columns_to_update = [
+        "visit_occurrence_id", "visit_start_date", "visit_end_date", "visit_start_datetime", "visit_end_datetime"
+    ]
+    other_columns = [column for column in visit_occurrence.columns if column not in columns_to_update]
+    visit_occurrence_inpatient_visits_fixed = visit_occurrence.alias("visit").join(
+        master_inpatient_visits.alias("master"),
+        (f.col("master.visit_occurrence_id") == f.col("visit.visit_occurrence_id")),
+        "left_outer"
+    ).select(
+        [
+            f.coalesce(f.col(f"master.{column}"), f.col(f"visit.{column}")).alias(column)
+            for column in columns_to_update
+        ] + [
+            f.col(f"visit.{column}").alias(column)
+            for column in other_columns
+        ]
+    )
+    visit_occurrence_inpatient_visits_fixed = visit_occurrence_inpatient_visits_fixed.join(
+        inpatient_visit_mappings.select("visit_occurrence_id"),
+        on="visit_occurrence_id",
+        how="left_anti"
+    )
+    visit_occurrence_inpatient_visits_fixed.write.mode("overwrite").parquet(
+        os.path.join(visit_mapping_folder, "visit_occurrence_inpatient_visits_fixed")
+    )
+    return visit_occurrence_inpatient_visits_fixed, inpatient_visit_mappings
 
 
 def main(args):
@@ -760,6 +982,8 @@ def main(args):
             os.path.join(args.output_folder, domain_table_name)
         )
 
+    visit_occurrence, inpatient_visit_mappings = consolidate_inpatient_visits(spark, args)
+
     for vocabulary_table in VOCABULARY_TABLES:
         if not os.path.exists(os.path.join(args.output_folder, vocabulary_table)):
             shutil.copytree(
@@ -785,6 +1009,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_folder",
         dest="output_folder",
+        action="store",
+        required=True,
+    )
+    parser.add_argument(
+        "--cleaned_output_folder",
+        dest="cleaned_output_folder",
         action="store",
         required=True,
     )
