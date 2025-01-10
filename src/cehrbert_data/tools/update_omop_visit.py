@@ -1,7 +1,8 @@
 import os
 import argparse
+import shutil
 
-from cehrbert_data.tools.ehrshot_to_omop import table_mapping
+from cehrbert_data.tools.ehrshot_to_omop import table_mapping, VOCABULARY_TABLES
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
@@ -32,6 +33,13 @@ def main(args):
             )
             omop_table.write.mode("overwrite").parquet(os.path.join(args.output_folder, omop_table_name))
 
+    vocabulary_table: str
+    for vocabulary_table in VOCABULARY_TABLES:
+        if not os.path.exists(os.path.join(args.output_folder, vocabulary_table)):
+            shutil.copytree(
+                os.path.join(args.vocabulary_folder, vocabulary_table),
+                os.path.join(args.output_folder, vocabulary_table),
+            )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments for connecting OMOP visits in chronological order")
