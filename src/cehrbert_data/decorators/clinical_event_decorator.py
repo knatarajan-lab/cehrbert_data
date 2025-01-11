@@ -47,10 +47,18 @@ class ClinicalEventDecorator(PatientEventDecorator):
         visit_segment_udf = F.col("visit_rank_order") % F.lit(2) + 1
 
         # The visit records are joined to the cohort members (there could be multiple entries for the same patient)
-        # if multiple entries are present, we duplicate the visit records for those.
+        # if multiple entries are present, we duplicate the visit records for those. If the visit_occurrence dataframe
+        # contains visits for each cohort member, then we need to add cohort_member_id to the joined expression as well.
+        if "cohort_member_id" in self._visit_occurrence.columns:
+            joined_expr = ["visit_occurrence_id", "cohort_member_id"]
+        else:
+            joined_expr = ["visit_occurrence_id"]
+
         visits = (
-            self._visit_occurrence.join(valid_visit_ids, "visit_occurrence_id")
-            .select(
+            self._visit_occurrence.join(
+                valid_visit_ids,
+                joined_expr
+            ).select(
                 "person_id",
                 "cohort_member_id",
                 "visit_occurrence_id",
