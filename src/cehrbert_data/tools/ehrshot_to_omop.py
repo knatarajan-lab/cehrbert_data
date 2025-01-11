@@ -667,13 +667,13 @@ def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str)
             .rowsBetween(Window.unboundedPreceding, Window.currentRow)
         )
     ).withColumn(
-        "row_number",
-        f.row_number().over(Window.orderBy(f.col("visit_id"), f.col("visit_partition")))
+        "visit_partition_rank",
+        f.dense_rank().over(Window.orderBy(f.col("visit_id"), f.col("visit_partition")))
     ).crossJoin(
         visit_records.select(f.max("visit_id").alias("max_visit_id"))
     ).withColumn(
         "new_visit_id",
-        f.col("max_visit_id") + f.col("row_number")
+        f.col("max_visit_id") + f.col("visit_partition_rank")
     ).drop(
         "max_visit_id", "row_number"
     )
