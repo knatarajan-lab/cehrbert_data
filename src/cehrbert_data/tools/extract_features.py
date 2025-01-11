@@ -171,7 +171,7 @@ def main(args):
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime")).cast(t.TimestampType())
         )
         cohort_member_visit_folder = os.path.join(
-            args.input_folder, args.cohort_name, "cohort_member_visit_occurrence"
+            args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
         )
         cohort_visit_occurrence.write.mode("overwrite").parquet(
             cohort_member_visit_folder

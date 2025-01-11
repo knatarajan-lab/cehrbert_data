@@ -99,7 +99,7 @@ class AttEventDecorator(PatientEventDecorator):
         # Cache visit for faster processing
         visit_occurrence = self.try_persist_data(
             visit_occurrence,
-            "att_visit_occurrence_temp"
+            os.path.join(self.get_name(), "visit_occurrence_temp"),
         )
 
         visits = visit_occurrence.drop("discharged_to_concept_id")
