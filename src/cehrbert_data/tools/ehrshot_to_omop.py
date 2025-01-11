@@ -597,11 +597,102 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
 
     # Validate the uniqueness of visit_id
     artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1)).collect()
-    # Join the generated visit_id back to data
-    return domain_records.unionByName(
+
+    # There are records that fall outside the corresponding visits, the time difference could be days
+    # and evens years apart, this is likely that the timestamps of the lab events are the time when the
+    # lab results came back instead of when the labs were sent out, therefore creating the time discrepancy.
+    # In this case, we will disassociate such records with the visits and will try to connect them to the
+    # other visits.
+    real_visit_inferred_start_end = domain_records.alias("domain").join(
+        real_visits.alias("visit"),
+        f.col("domain.visit_id") == f.col("visit.visit_id"),
+    ).groupby("domain.visit_id").agg(
+        f.min("domain.start").alias("start"),
+        f.max("domain.start").alias("end")
+    )
+    real_visit_to_fix = real_visit_inferred_start_end.alias("d_visit").join(
+        real_visits.alias("visit"),
+        f.col("d_visit.visit_id") == f.col("visit.visit_id"),
+    ).where(
+        (f.col("d_visit.start") < f.date_sub(f.col("visit.start"), 1)) |
+        (f.col("d_visit.end") > f.date_add(f.col("visit.end"), 1))
+    ).select(
+        f.col("visit.visit_id").alias("visit_id"),
+        f.col("visit.start").alias("start"),
+        f.col("visit.end").alias("end"),
+        f.col("d_visit.start").alias("inferred_start"),
+        f.col("d_visit.end").alias("inferred_end"),
+    )
+    real_visit_to_fix_folder = os.path.join(visit_reconstruction_folder, "real_visit_to_fix")
+    real_visit_to_fix.write.mode("overwrite").parquet(real_visit_to_fix_folder)
+    real_visit_to_fix = spark.read.parquet(real_visit_to_fix_folder)
+
+    # Identify the unique visit_id/start pairs, we will identify the boundary of the visit
+    distinct_visit_date_mapping = domain_records.alias("domain").join(
+        real_visit_to_fix.alias("visit"),
+        f.col("domain.visit_id") == f.col("visit.visit_id"),
+    ).select(
+        f.col("domain.visit_id").alias("visit_id"),
+        f.col("domain.start").alias("start"),
+    ).distinct().withColumn(
+        "visit_order",
+        f.row_number().over(
+            Window.partitionBy("visit_id").orderBy("start")
+        )
+    ).withColumn(
+        "prev_start",
+        f.lag("start").over(
+            Window.partitionBy("visit_id").orderBy("visit_order")
+        )
+    ).withColumn(
+        "hour_diff",
+        f.coalesce(
+            (f.unix_timestamp("start") - f.unix_timestamp("prev_start")) / 3600,
+            f.lit(0)
+        )
+    ).withColumn(
+        "visit_partition",
+        f.sum((f.col("hour_diff") > 24).cast("int")).over(
+            Window.partitionBy("visit_id").orderBy("visit_order")
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+        )
+    ).withColumn(
+        "row_number",
+        f.row_number().over(Window.orderBy(f.col("visit_id"), f.col("visit_partition")))
+    ).crossJoin(
+        real_visits.unionByName(artificial_visits).select(f.max("visit_id").alias("max_visit_id"))
+    ).withColumn(
+        "new_visit_id",
+        f.col("max_visit_id") + f.col("row_number")
+    ).drop(
+        "max_visit_id", "row_number"
+    )
+
+    # Connect visit partitions in chronological order
+    distinct_visit_date_pair_folder = os.path.join(visit_reconstruction_folder, "distinct_visit_date_mapping")
+    distinct_visit_date_mapping.write.mode("overwrite").parquet(distinct_visit_date_pair_folder)
+    distinct_visit_date_mapping = spark.read.parquet(distinct_visit_date_pair_folder)
+
+    all_records = domain_records.unionByName(
         real_visits
     ).unionByName(
         artificial_visits
+    )
+
+    return all_records.alias("ehr").join(
+        distinct_visit_date_mapping.alias("visit"),
+        (f.col("ehr.visit_id") == f.col("visit.visit_id"))
+        & (f.col("ehr.start") == f.col("visit.start")),
+        "left_outer"
+    ).select(
+        [
+            f.coalesce(f.col("visit.new_visit_id"), f.col("ehr.visit_id")).alias("visit_id"),
+            f.coalesce(f.col("visit.visit_id"), f.col("ehr.visit_id")).alias("original_visit_id")
+        ]
+            +
+        [
+            f.col(f"ehr.{column}").alias(column) for column in all_records.columns if column != "visit_id"
+        ]
     )
 
 
@@ -786,12 +877,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_folder",
         dest="output_folder",
-        action="store",
-        required=True,
-    )
-    parser.add_argument(
-        "--cleaned_output_folder",
-        dest="cleaned_output_folder",
         action="store",
         required=True,
     )
