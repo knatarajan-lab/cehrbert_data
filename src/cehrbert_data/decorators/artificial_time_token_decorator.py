@@ -97,7 +97,10 @@ class AttEventDecorator(PatientEventDecorator):
         visit_occurrence = visit_occurrence.withColumn("date_in_week", weeks_since_epoch_udf)
 
         # Cache visit for faster processing
-        visit_occurrence.cache()
+        visit_occurrence = self.try_persist_data(
+            visit_occurrence,
+            "att_visit_occurrence_temp"
+        )
 
         visits = visit_occurrence.drop("discharged_to_concept_id")
 
