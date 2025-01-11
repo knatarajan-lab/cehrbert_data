@@ -142,15 +142,18 @@ def main(args):
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
-        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
-            "order", f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
+        cohort_visit_occurrence = cohort_visit_occurrence.join(
+            cohort.select("cohort_member_id", "person_id"),
+            "person_id"
         )
         visit_index_date = cohort_visit_occurrence.alias("visit").join(
             cohort.alias("cohort"),
-            "person_id"
+            (f.col("visit.person_id") == f.col("cohort.person_id"))
+            & (f.col("visit.cohort_member_id") == f.col("cohort.cohort_member_id")),
         ).where(
             f.col("cohort.index_date").between(f.col("visit.visit_start_datetime"), f.col("visit.visit_end_datetime"))
         ).select(
+            f.col("visit.cohort_member_id").alias("cohort_member_id"),
             f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
             f.col("cohort.index_date").alias("index_date"),
         )
@@ -158,7 +161,7 @@ def main(args):
         # Bound the visit_end_date and visit_end_datetime
         cohort_visit_occurrence = cohort_visit_occurrence.join(
             visit_index_date,
-            "visit_occurrence_id",
+            ["visit_occurrence_id", "cohort_member_id"],
             "left_outer",
         ).withColumn(
             "visit_end_date",
@@ -166,7 +169,7 @@ def main(args):
         ).withColumn(
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime")).cast(t.TimestampType())
-        ).orderBy(f.col("order")).drop("order")
+        )
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
