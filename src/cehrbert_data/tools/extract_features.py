@@ -170,6 +170,13 @@ def main(args):
             "visit_end_datetime",
             f.coalesce(f.col("index_date"), f.col("visit_end_datetime")).cast(t.TimestampType())
         )
+        cohort_member_visit_folder = os.path.join(
+            args.input_folder, args.cohort_name, "cohort_member_visit_occurrence"
+        )
+        cohort_visit_occurrence.write.mode("overwrite").parquet(
+            cohort_member_visit_folder
+        )
+        cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder)
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
