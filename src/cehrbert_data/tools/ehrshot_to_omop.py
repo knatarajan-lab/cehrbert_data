@@ -598,20 +598,30 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
     # Validate the uniqueness of visit_id
     artificial_visits.groupby("visit_id").count().select(f.assert_true(f.col("count") == 1)).collect()
 
+    return domain_records.unionByName(
+        real_visits
+    ).unionByName(
+        artificial_visits
+    )
+
+def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str):
     # There are records that fall outside the corresponding visits, the time difference could be days
     # and evens years apart, this is likely that the timestamps of the lab events are the time when the
     # lab results came back instead of when the labs were sent out, therefore creating the time discrepancy.
     # In this case, we will disassociate such records with the visits and will try to connect them to the
     # other visits.
-    real_visit_inferred_start_end = domain_records.alias("domain").join(
-        real_visits.alias("visit"),
+    visit_reconstruction_folder = os.path.join(cache_folder, "visit_reconstruction")
+    domain_records = data.where(f.col("omop_table") != "visit_occurrence")
+    visit_records = data.where(f.col("omop_table") == "visit_occurrence")
+    visit_inferred_start_end = domain_records.alias("domain").join(
+        visit_records.alias("visit"),
         f.col("domain.visit_id") == f.col("visit.visit_id"),
     ).groupby("domain.visit_id").agg(
         f.min("domain.start").alias("start"),
         f.max("domain.start").alias("end")
     )
-    real_visit_to_fix = real_visit_inferred_start_end.alias("d_visit").join(
-        real_visits.alias("visit"),
+    visit_to_fix = visit_inferred_start_end.alias("d_visit").join(
+        visit_records.alias("visit"),
         f.col("d_visit.visit_id") == f.col("visit.visit_id"),
     ).where(
         (f.col("d_visit.start") < f.date_sub(f.col("visit.start"), 1)) |
@@ -623,13 +633,13 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         f.col("d_visit.start").alias("inferred_start"),
         f.col("d_visit.end").alias("inferred_end"),
     )
-    real_visit_to_fix_folder = os.path.join(visit_reconstruction_folder, "real_visit_to_fix")
-    real_visit_to_fix.write.mode("overwrite").parquet(real_visit_to_fix_folder)
-    real_visit_to_fix = spark.read.parquet(real_visit_to_fix_folder)
+    visit_to_fix_folder = os.path.join(visit_reconstruction_folder, "visit_to_fix")
+    visit_to_fix.write.mode("overwrite").parquet(visit_to_fix_folder)
+    visit_to_fix = spark.read.parquet(visit_to_fix_folder)
 
     # Identify the unique visit_id/start pairs, we will identify the boundary of the visit
     distinct_visit_date_mapping = domain_records.alias("domain").join(
-        real_visit_to_fix.alias("visit"),
+        visit_to_fix.alias("visit"),
         f.col("domain.visit_id") == f.col("visit.visit_id"),
     ).select(
         f.col("domain.visit_id").alias("visit_id"),
@@ -660,7 +670,7 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         "row_number",
         f.row_number().over(Window.orderBy(f.col("visit_id"), f.col("visit_partition")))
     ).crossJoin(
-        real_visits.unionByName(artificial_visits).select(f.max("visit_id").alias("max_visit_id"))
+        visit_records.select(f.max("visit_id").alias("max_visit_id"))
     ).withColumn(
         "new_visit_id",
         f.col("max_visit_id") + f.col("row_number")
@@ -673,27 +683,58 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
     distinct_visit_date_mapping.write.mode("overwrite").parquet(distinct_visit_date_pair_folder)
     distinct_visit_date_mapping = spark.read.parquet(distinct_visit_date_pair_folder)
 
-    all_records = domain_records.unionByName(
-        real_visits
-    ).unionByName(
-        artificial_visits
-    )
-
-    return all_records.alias("ehr").join(
+    fix_visit_records = data.alias("ehr").join(
         distinct_visit_date_mapping.alias("visit"),
         (f.col("ehr.visit_id") == f.col("visit.visit_id"))
         & (f.col("ehr.start") == f.col("visit.start")),
-        "left_outer"
+    ).where(
+        f.col("ehr.omop_table") == "visit_occurrence"
+    ).groupby(
+        f.col("visit.visit_id").alias("original_visit_id"),
+        f.col("visit.new_visit_id").alias("visit_id"),
+        f.col("ehr.patient_id").alias("patient_id"),
+        f.col("ehr.code").alias("code"),
+        f.col("ehr.value").alias("value"),
+        f.col("ehr.unit").alias("unit"),
+        f.col("ehr.omop_table").alias("omop_table"),
+    ).agg(
+        f.min("visit.start").alias("start"),
+        f.max("visit.start").alias("end"),
+    )
+    # Fix visit records
+    fix_visit_records_folder = os.path.join(visit_reconstruction_folder, "fix_visit_records")
+    fix_visit_records.write.mode("overwrite").parquet(fix_visit_records_folder)
+    fix_visit_records = spark.read.parquet(fix_visit_records_folder)
+
+    fix_domain_records = data.alias("ehr").join(
+        distinct_visit_date_mapping.alias("visit"),
+        (f.col("ehr.visit_id") == f.col("visit.visit_id"))
+        & (f.col("ehr.start") == f.col("visit.start")),
+    ).where(
+        f.col("ehr.omop_table") != "visit_occurrence"
     ).select(
         [
             f.coalesce(f.col("visit.new_visit_id"), f.col("ehr.visit_id")).alias("visit_id"),
             f.coalesce(f.col("visit.visit_id"), f.col("ehr.visit_id")).alias("original_visit_id")
         ]
-            +
+        +
         [
-            f.col(f"ehr.{column}").alias(column) for column in all_records.columns if column != "visit_id"
+            f.col(f"ehr.{column}").alias(column) for column in data.columns if column != "visit_id"
         ]
     )
+    # Fix domain records
+    fix_domain_records_folder = os.path.join(visit_reconstruction_folder, "fix_domain_records")
+    fix_domain_records.write.mode("overwrite").parquet(fix_domain_records_folder)
+    fix_domain_records = spark.read.parquet(fix_domain_records_folder)
+
+    # Retrieve other records that do not require fixing
+    other_events = data.join(
+        distinct_visit_date_mapping.select("visit_id").distinct(),
+        "visit_id",
+        "left_anti"
+    ).withColumn("original_visit_id", f.col("visit_id"))
+
+    return other_events.unionByName(fix_domain_records).unionByName(fix_visit_records)
 
 
 def drop_duplicate_visits(data: DataFrame) -> DataFrame:
@@ -756,6 +797,12 @@ def main(args):
         ).drop("_c0")
         # Add visit_id based on the time intervals between neighboring events
         ehr_shot_data = generate_visit_id(
+            ehr_shot_data,
+            spark,
+            args.output_folder,
+        )
+        # Disconnect domain records whose timestamps fall outside of the corresponding visit ranges
+        ehr_shot_data = disconnect_visit_id(
             ehr_shot_data,
             spark,
             args.output_folder,
