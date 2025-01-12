@@ -61,9 +61,21 @@ class AttEventDecorator(PatientEventDecorator):
             F.max("concept_order").alias("max_concept_order"),
         )
 
+        # The visit records are joined to the cohort members (there could be multiple entries for the same patient)
+        # if multiple entries are present, we duplicate the visit records for those. If the visit_occurrence dataframe
+        # contains visits for each cohort member, then we need to add cohort_member_id to the joined expression as well.
+        if "cohort_member_id" in self._visit_occurrence.columns:
+            joined_expr = ["person_id", "cohort_member_id"]
+        else:
+            joined_expr = ["person_id"]
+
         visit_occurrence = (
-            self._visit_occurrence.select(
+            self._visit_occurrence.join(
+                cohort_member_person_pair,
+                joined_expr
+            ).select(
                 "person_id",
+                "cohort_member_id",
                 F.col("visit_start_date").cast(T.DateType()).alias("date"),
                 F.col("visit_start_date").cast(T.DateType()).alias("visit_start_date"),
                 F.col("visit_start_datetime").cast(T.TimestampType()).alias("visit_start_datetime"),
@@ -79,8 +91,10 @@ class AttEventDecorator(PatientEventDecorator):
                 "age",
                 "discharged_to_concept_id",
             )
-            .join(valid_visit_ids, "visit_occurrence_id")
-            .join(cohort_member_person_pair, ["person_id", "cohort_member_id"])
+            .join(
+                valid_visit_ids,
+                ["visit_occurrence_id", "cohort_member_id"]
+            )
         )
 
         # We assume outpatient visits end on the same day, therefore we start visit_end_date to visit_start_date due
@@ -304,7 +318,7 @@ class AttEventDecorator(PatientEventDecorator):
             # Create ATT tokens within the inpatient visits
             inpatient_att_events = (
                 inpatient_events.withColumn(
-                  "time_stamp_hour", F.hour("datetime")
+                    "time_stamp_hour", F.hour("datetime")
                 ).withColumn(
                     "is_span_boundary",
                     F.row_number().over(
