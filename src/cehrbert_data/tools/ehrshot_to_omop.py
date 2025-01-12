@@ -848,6 +848,7 @@ def main(args):
             f.col("ehr.unit").alias("unit"),
             f.col("ehr.omop_table").alias("omop_table"),
             f.col("ehr.visit_id").alias("visit_id"),
+            f.col("ehr.original_visit_id").alias("original_visit_id"),
         )
         ehr_shot_data.write.mode("overwrite").parquet(ehr_shot_path)
 
