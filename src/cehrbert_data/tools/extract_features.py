@@ -143,21 +143,19 @@ def main(args):
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
-        visit_index_date = cohort_visit_occurrence.alias("visit").join(
-            cohort.alias("cohort"),
-            (f.col("visit.person_id") == f.col("cohort.person_id"))
-            & (f.col("visit.cohort_member_id") == f.col("cohort.cohort_member_id")),
-        ).where(
-            f.col("cohort.index_date").between(f.col("visit.visit_start_datetime"), f.col("visit.visit_end_datetime"))
-        ).select(
-            f.col("visit.person_id").alias("person_id"),
-            f.col("visit.cohort_member_id").alias("cohort_member_id"),
-            f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
-            f.col("visit.visit_concept_id").alias("visit_concept_id"),
-            f.col("cohort.index_date").alias("index_date"),
-        )
+        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
+            "time_diff_from_index_date",
+            f.abs(f.unix_timestamp("index_date") - f.unix_timestamp("visit_start_datetime"))
+        ).withColumn(
+            "visit_rank",
+            f.row_number().over(
+                Window.orderBy("person_id", "cohort_member_id").orderBy("time_diff_from_index_date")
+            )
+        ).drop("time_diff_from_index_date")
 
-        placeholder_tokens = visit_index_date.select(
+        placeholder_tokens = cohort_visit_occurrence.where(
+            f.col("visit_rank") == 1
+        ).select(
             "person_id",
             "cohort_member_id",
             "index_date",
@@ -182,16 +180,15 @@ def main(args):
         )
 
         # Bound the visit_end_date and visit_end_datetime
-        cohort_visit_occurrence = cohort_visit_occurrence.join(
-            visit_index_date.drop("visit_concept_id"),
-            ["visit_occurrence_id", "cohort_member_id", "person_id"],
-            "left_outer",
+        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
+            "visit_end_datetime",
+            f.when(
+                f.col("visit_end_datetime") > f.col("index_date"),
+                f.col("index_date")
+            ).otherwise(f.col("visit_end_datetime"))
         ).withColumn(
             "visit_end_date",
-            f.coalesce(f.col("index_date").cast(t.DateType()), f.col("visit_end_date"))
-        ).withColumn(
-            "visit_end_datetime",
-            f.coalesce(f.col("index_date"), f.col("visit_end_datetime")).cast(t.TimestampType())
+            f.col("visit_end_datetime").cast(t.DateType())
         )
         cohort_member_visit_folder = os.path.join(
             args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
@@ -199,7 +196,7 @@ def main(args):
         cohort_visit_occurrence.write.mode("overwrite").parquet(
             cohort_member_visit_folder
         )
-        cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder)
+        cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
