@@ -149,7 +149,7 @@ def main(args):
         ).withColumn(
             "visit_rank",
             f.row_number().over(
-                Window.orderBy("person_id", "cohort_member_id").orderBy("time_diff_from_index_date")
+                Window.partitionBy("person_id", "cohort_member_id").orderBy("time_diff_from_index_date")
             )
         ).drop("time_diff_from_index_date")
 
