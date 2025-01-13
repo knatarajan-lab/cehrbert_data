@@ -571,7 +571,7 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
     # Generate the artificial visits
     artificial_visits = orphan_records.groupBy("new_visit_id", "patient_id").agg(
         f.min("start").alias("start"),
-        f.max("end").alias("end")
+        f.max("start").alias("end")
     ).withColumn(
         "code",
         f.lit(0)
