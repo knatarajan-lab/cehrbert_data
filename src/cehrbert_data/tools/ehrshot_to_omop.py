@@ -419,7 +419,12 @@ def convert_code_to_omop_concept(
     ).select(output_columns)
 
 
-def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -> DataFrame:
+def generate_visit_id(
+        data: DataFrame,
+        spark: SparkSession,
+        cache_folder: str,
+        day_cutoff: int = 1
+) -> DataFrame:
     """
      Generates unique `visit_id`s for each visit based on distinct patient event records.
 
@@ -441,6 +446,8 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         The current spark session
      cache_folder: str
         The cache folder for saving the intermediate dataframes
+     day_cutoff: int
+        Day cutoff to disconnect the records with their associated visit
 
      Returns
      -------
@@ -488,7 +495,7 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
 
     # Invalidate visit_id if the record's time stamp falls outside the visit start/end
     domain_records = domain_records.alias("domain").join(
-        real_visits.where("code == 'Visit/IP'").alias("in_visit"),
+        real_visits.where(f.col("code").isin(['Visit/IP', 'Visit/ERIP'])).alias("in_visit"),
         (f.col("domain.patient_id") == f.col("in_visit.patient_id")) &
         (f.col("domain.visit_id") == f.col("in_visit.visit_id")),
         "left_outer"
@@ -497,7 +504,8 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         f.coalesce(
             f.when(
                 f.col("domain.start").between(
-                    f.date_sub(f.col("in_visit.start"), 1), f.date_add(f.col("in_visit.end"), 1)
+                    f.date_sub(f.col("in_visit.start"), day_cutoff),
+                    f.date_add(f.col("in_visit.end"), day_cutoff)
                 ),
                 f.col("domain.visit_id")
             ).otherwise(f.lit(None).cast(t.LongType())),
@@ -510,16 +518,22 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         ] + [f.col("new_visit_id").alias("visit_id")]
     )
 
-    # Join the DataFrames with aliasing
+    # Join the records to the nearest visits if they occur within the visit span with aliasing
     domain_records = domain_records.alias("domain").join(
         real_visits.alias("visit"),
         (f.col("domain.patient_id") == f.col("visit.patient_id")) &
-        (f.col("domain.start").cast(t.DateType()).between(f.col("visit.visit_start_date"),
-                                                          f.col("visit.visit_end_date"))),
+        (f.col("domain.start").between(
+            f.col("visit.visit_start_datetime"),
+            f.col("visit.visit_end_datetime"))
+        ),
         "left_outer"
     ).withColumn(
         "ranking",
-        f.row_number().over(Window.partitionBy("domain.record_id").orderBy(f.col("visit.visit_start_date").desc()))
+        f.row_number().over(
+            Window.partitionBy("domain.record_id").orderBy(
+                f.abs(f.unix_timestamp("visit.visit_start_datetime") - f.unix_timestamp("domain.start"))
+            )
+        )
     ).where(
         f.col("ranking") == 1
     ).select(
@@ -604,7 +618,12 @@ def generate_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str) -
         artificial_visits
     )
 
-def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str):
+def disconnect_visit_id(
+        data: DataFrame,
+        spark: SparkSession,
+        cache_folder: str,
+        day_cutoff: int = 1
+):
     # There are records that fall outside the corresponding visits, the time difference could be days
     # and evens years apart, this is likely that the timestamps of the lab events are the time when the
     # lab results came back instead of when the labs were sent out, therefore creating the time discrepancy.
@@ -624,8 +643,8 @@ def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str)
         visit_records.alias("visit"),
         f.col("d_visit.visit_id") == f.col("visit.visit_id"),
     ).where(
-        (f.col("d_visit.start") < f.date_sub(f.col("visit.start"), 1)) |
-        (f.col("d_visit.end") > f.date_add(f.col("visit.end"), 1))
+        (f.col("d_visit.start") < f.date_sub(f.col("visit.start"), day_cutoff)) |
+        (f.col("d_visit.end") > f.date_add(f.col("visit.end"), day_cutoff))
     ).select(
         f.col("visit.visit_id").alias("visit_id"),
         f.col("visit.start").alias("start"),
@@ -644,6 +663,7 @@ def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str)
     ).select(
         f.col("domain.visit_id").alias("visit_id"),
         f.col("domain.start").alias("start"),
+        f.col("domain.code").alias("code"),
     ).distinct().withColumn(
         "visit_order",
         f.row_number().over(
@@ -685,8 +705,7 @@ def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str)
 
     fix_visit_records = data.alias("ehr").join(
         distinct_visit_date_mapping.alias("visit"),
-        (f.col("ehr.visit_id") == f.col("visit.visit_id"))
-        & (f.col("ehr.start") == f.col("visit.start")),
+        f.col("ehr.visit_id") == f.col("visit.visit_id"),
     ).where(
         f.col("ehr.omop_table") == "visit_occurrence"
     ).groupby(
@@ -709,7 +728,8 @@ def disconnect_visit_id(data: DataFrame, spark: SparkSession, cache_folder: str)
     fix_domain_records = data.alias("ehr").join(
         distinct_visit_date_mapping.alias("visit"),
         (f.col("ehr.visit_id") == f.col("visit.visit_id"))
-        & (f.col("ehr.start") == f.col("visit.start")),
+        & (f.col("ehr.start") == f.col("visit.start"))
+        & (f.col("ehr.code") == f.col("visit.code")),
     ).where(
         f.col("ehr.omop_table") != "visit_occurrence"
     ).select(
