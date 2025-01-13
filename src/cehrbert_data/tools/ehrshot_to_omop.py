@@ -693,7 +693,15 @@ def disconnect_visit_id(
     ).agg(
         f.min("visit.start").alias("start"),
         f.max("visit.start").alias("end"),
+    ).withColumn(
+        "code",
+        f.when(
+            (f.col("code").isin(['Visit/IP', 'Visit/ERIP']))
+            & ((f.unix_timestamp("end") - f.unix_timestamp("start")) / 3600 <= 24),
+            f.lit("Visit/OP")
+        ).otherwise(f.col("code"))
     )
+
     # Fix visit records
     fix_visit_records_folder = os.path.join(visit_reconstruction_folder, "fix_visit_records")
     fix_visit_records.write.mode("overwrite").parquet(fix_visit_records_folder)
@@ -715,13 +723,6 @@ def disconnect_visit_id(
         [
             f.col(f"ehr.{column}").alias(column) for column in data.columns if column != "visit_id"
         ]
-    ).withColumn(
-        "code",
-        f.when(
-            (f.col("code").isin(['Visit/IP', 'Visit/ERIP']))
-            & ((f.unix_timestamp("end") - f.unix_timestamp("start")) / 3600 <= 24),
-            f.lit("Visit/OP")
-        ).otherwise("code")
     )
 
     # Fix domain records
