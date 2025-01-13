@@ -153,6 +153,7 @@ def main(args):
             )
         ).drop("time_diff_from_index_date")
 
+        # We create placeholder tokens for those inpatient visits, where the first token occurs after the index_date
         placeholder_tokens = cohort_visit_occurrence.where(
             f.col("visit_rank") == 1
         ).select(
@@ -170,7 +171,12 @@ def main(args):
             f.lit(None).cast(t.StringType()).alias("event_group_id"),
             "visit_concept_id",
             f.lit(-1).alias("age")
+        ).join(
+            ehr_records.select("cohort_member_id", "visit_occurrence_id"),
+            ["cohort_member_id", "visit_occurrence_id"],
+            "left_anti",
         )
+
         placeholder_tokens.write.mode("overwrite").parquet(
             os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
         )
