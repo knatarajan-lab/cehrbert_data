@@ -167,7 +167,7 @@ def main(args):
             "visit_occurrence_id",
             f.lit("0").alias("standard_concept_id"),
             f.col("index_date").cast(t.DateType()).alias("date"),
-            f.expr("index_date - INTERVAL 1 MINUTE").alias("datetime"),
+            f.col("index_date").alias("datetime"),
             f.lit("unknown").alias("domain"),
             f.lit(None).cast(t.StringType()).alias("unit"),
             f.lit(None).cast(t.FloatType()).alias("number_as_value"),
