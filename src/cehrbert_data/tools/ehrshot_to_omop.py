@@ -503,7 +503,7 @@ def generate_visit_id(
         "ranking",
         f.row_number().over(
             Window.partitionBy("domain.record_id").orderBy(
-                f.abs(f.unix_timestamp("visit.visit_start_datetime") - f.unix_timestamp("domain.start"))
+                f.abs(f.unix_timestamp("visit.start") - f.unix_timestamp("domain.start"))
             )
         )
     ).where(
@@ -615,8 +615,10 @@ def disconnect_visit_id(
         visit_records.alias("visit"),
         f.col("d_visit.visit_id") == f.col("visit.visit_id"),
     ).where(
-        (f.col("d_visit.start") < f.date_sub(f.col("visit.start"), day_cutoff)) |
-        (f.col("d_visit.end") > f.date_add(f.col("visit.end"), day_cutoff))
+        # If the record is 24 * day_cutoff hours before the visit_start or
+        # if the record is 24 * day_cutoff hours after the visit_end
+        ((f.unix_timestamp("visit.start") - f.unix_timestamp("d_visit.start")) / 3600 > day_cutoff * 24) |
+        ((f.unix_timestamp("d_visit.end") - f.unix_timestamp("visit.end")) / 3600 > day_cutoff * 24)
     ).select(
         f.col("visit.visit_id").alias("visit_id"),
         f.col("visit.start").alias("start"),
