@@ -715,7 +715,15 @@ def disconnect_visit_id(
         [
             f.col(f"ehr.{column}").alias(column) for column in data.columns if column != "visit_id"
         ]
+    ).withColumn(
+        "code",
+        f.when(
+            (f.col("code").isin(['Visit/IP', 'Visit/ERIP']))
+            & ((f.unix_timestamp("end") - f.unix_timestamp("start")) / 3600 <= 24),
+            f.lit("Visit/OP")
+        ).otherwise("code")
     )
+
     # Fix domain records
     fix_domain_records_folder = os.path.join(visit_reconstruction_folder, "fix_domain_records")
     fix_domain_records.write.mode("overwrite").parquet(fix_domain_records_folder)
@@ -800,6 +808,7 @@ def main(args):
             ehr_shot_data,
             spark,
             args.output_folder,
+            args.day_cutoff,
         )
         outpatient_visits = ehr_shot_data.where(
             ~f.col("code").isin(["Visit/IP", "Visit/ERIP"])
@@ -928,6 +937,14 @@ if __name__ == "__main__":
         "--refresh_ehrshot",
         dest="refresh_ehrshot",
         action="store_true",
+    )
+    parser.add_argument(
+        "--day_cutoff",
+        dest="day_cutoff",
+        action="store",
+        type=int,
+        default=2,
+        required=False,
     )
     main(
         parser.parse_args()
