@@ -943,7 +943,7 @@ if __name__ == "__main__":
         dest="day_cutoff",
         action="store",
         type=int,
-        default=2,
+        default=1,
         required=False,
     )
     main(
