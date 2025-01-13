@@ -160,24 +160,28 @@ def main(args):
             f.col("cohort.index_date").alias("index_date"),
         )
 
+        placeholder_tokens = visit_index_date.select(
+            "person_id",
+            "cohort_member_id",
+            "index_date",
+            "visit_occurrence_id",
+            f.lit("0").alias("standard_concept_id"),
+            f.col("index_date").cast(t.DateType()).alias("date"),
+            f.expr("index_date - INTERVAL 1 MINUTE").alias("datetime"),
+            f.lit("unknown").alias("domain"),
+            f.lit(None).cast(t.StringType()).alias("unit"),
+            f.lit(None).cast(t.FloatType()).alias("number_as_value"),
+            f.lit(None).cast(t.StringType()).alias("concept_as_value"),
+            f.lit(None).cast(t.StringType()).alias("event_group_id"),
+            "visit_concept_id",
+            f.lit(-1).alias("age")
+        )
+        placeholder_tokens.write.mode("overwrite").parquet(
+            os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
+        )
         # Add an artificial token for the visit in which the prediction is made
         ehr_records = ehr_records.unionByName(
-            visit_index_date.select(
-                "person_id",
-                "cohort_member_id",
-                "index_date",
-                "visit_occurrence_id",
-                f.lit("0").alias("standard_concept_id"),
-                f.col("index_date").cast(t.DateType()).alias("date"),
-                f.expr("index_date - INTERVAL 1 MINUTE").alias("datetime"),
-                f.lit("unknown").alias("domain"),
-                f.lit(None).cast(t.StringType()).alias("unit"),
-                f.lit(None).cast(t.FloatType()).alias("number_as_value"),
-                f.lit(None).cast(t.StringType()).alias("concept_as_value"),
-                f.lit(None).cast(t.StringType()).alias("event_group_id"),
-                "visit_concept_id",
-                f.lit(-1).alias("age")
-            )
+            placeholder_tokens
         )
 
         # Bound the visit_end_date and visit_end_datetime
