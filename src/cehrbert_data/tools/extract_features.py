@@ -23,11 +23,6 @@ class PredictionType(Enum):
     REGRESSION = "regression"
 
 
-def get_temp_folder(args, table_name):
-    cleaned_cohort_name = re.sub(r'[^A-Za-z0-9]', '_', args.cohort_name)
-    return os.path.join(args.output_folder, f"{cleaned_cohort_name}_{table_name}")
-
-
 def create_feature_extraction_args():
     spark_args = create_spark_args(
         parse=False
@@ -92,7 +87,9 @@ def main(args):
     cohort_csv = cohort_csv.withColumn("cohort_member_id", cohort_member_id_udf)
 
     # Save cohort as parquet files
-    cohort_temp_folder = get_temp_folder(args, "cohort")
+    cohort_temp_folder = os.path.join(
+        args.output_folder, args.cohort_name, "cohort"
+    )
     cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
 
@@ -112,15 +109,16 @@ def main(args):
     ehr_records = cohort.select("person_id", "cohort_member_id", "index_date").join(
         ehr_records,
         "person_id"
-    ).where(ehr_records["date"] <= cohort["index_date"])
-
-    ehr_records_temp_folder = get_temp_folder(args, "ehr_records")
-    ehr_records.repartition("person_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
+    ).where(ehr_records["datetime"] <= cohort["index_date"])
+    ehr_records_temp_folder = os.path.join(
+        args.output_folder, args.cohort_name, "ehr_records"
+    )
+    ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
     ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     cohort_visit_occurrence = visit_occurrence.join(
-        cohort.select("person_id").distinct(),
+        cohort.select("person_id", "cohort_member_id", "index_date"),
         "person_id"
     ).withColumn(
         "visit_start_date",
@@ -138,14 +136,13 @@ def main(args):
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
         ).cast(t.TimestampType())
+    ).where(
+        f.col("visit_start_datetime") <= f.col("index_date")
     )
+
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
-        cohort_visit_occurrence = cohort_visit_occurrence.join(
-            cohort.select("cohort_member_id", "person_id"),
-            "person_id"
-        )
         visit_index_date = cohort_visit_occurrence.alias("visit").join(
             cohort.alias("cohort"),
             (f.col("visit.person_id") == f.col("cohort.person_id"))
@@ -294,12 +291,6 @@ def main(args):
         shutil.rmtree(os.path.join(cohort_folder, "temp"))
     else:
         cohort.write.mode("overwrite").parquet(cohort_folder)
-
-    if os.path.exists(cohort_temp_folder):
-        shutil.rmtree(cohort_temp_folder)
-
-    if os.path.exists(ehr_records_temp_folder):
-        shutil.rmtree(ehr_records_temp_folder)
 
     spark.stop()
 
