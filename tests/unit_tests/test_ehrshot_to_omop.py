@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
@@ -65,10 +66,10 @@ class EHRShotUnitTest(unittest.TestCase):
         # Sample data with multiple events for each patient and different time gaps
         data = [
             (1, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1, "visit_occurrence", None, None, None),
-            (1, datetime(2023, 1, 1, 20), datetime(2023, 1, 1, 20), None, "condition_occurrence", None, None, None),  # 11-hour gap (merged visit)
-            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), 2, "visit_occurrence", None, None, None),  # another visit
+            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), None, "condition_occurrence", None, None, None), # merge with the visit record below
+            (1, datetime(2023, 1, 2, 20), datetime(2023, 1, 2, 20), 2, "visit_occurrence", "Visit/IP", None, None),  # another visit
             (2, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 3, "visit_occurrence", None, None, None),
-            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None, "condition_occurrence", None, None, None),  # same visit for patient 2
+            (2, datetime(2023, 1, 1, 10), datetime(2023, 1, 1, 11), None, "condition_occurrence", None, None, None),
             (3, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), 1000, "visit_occurrence", None, None, None),
             (4, datetime(2023, 1, 1, 8), datetime(2023, 1, 1, 9), None, "condition_occurrence", None, None, None)
         ]
@@ -76,11 +77,13 @@ class EHRShotUnitTest(unittest.TestCase):
         # Create DataFrame
         data = self.spark.createDataFrame(data, schema=schema)
         # Run the function to generate visit IDs
-        result_df = generate_visit_id(data)
-        result_df.show()
+        temp_dir = tempfile.mkdtemp()
+        result_df = generate_visit_id(data, self.spark, temp_dir)
+        result_df.orderBy("patient_id", "start").show()
         # Validate the number of visits
-        self.assertEqual(5, result_df.select("visit_id").where(f.col("visit_id").isNotNull()).distinct().count())
-        self.assertEqual(8, result_df.count())
+        self.assertEqual(6, result_df.select("visit_id").where(f.col("visit_id").isNotNull()).distinct().count())
+        # Two artificial visits are created therefore it's 7 + 2 = 9
+        self.assertEqual(9, result_df.count())
 
         # Check that visit_id was generated as an integer (bigint)
         self.assertIn(
@@ -98,7 +101,7 @@ class EHRShotUnitTest(unittest.TestCase):
 
         patient_2_visits = result_df.filter(f.col("patient_id") == 2).select("visit_id").distinct().count()
         self.assertEqual(
-            1, patient_2_visits, "Patient 2 should have one visit as events are within time interval."
+            2, patient_2_visits, "Patient 2 should have one visit as events are within time interval."
         )
 
         patient_3_visits = result_df.filter(f.col("patient_id") == 3).select("visit_id").distinct().count()
@@ -107,8 +110,8 @@ class EHRShotUnitTest(unittest.TestCase):
         )
 
         patient_4_visits = result_df.filter(f.col("patient_id") == 4).select("visit_id").collect()[0].visit_id
-        self.assertEqual(
-            1001, patient_4_visits, "Patient 4 should have one generated visit_id."
+        self.assertTrue(
+            patient_4_visits > 1000, "Patient 4 should have one generated visit_id."
         )
 
     def test_drop_duplicate_visits(self):

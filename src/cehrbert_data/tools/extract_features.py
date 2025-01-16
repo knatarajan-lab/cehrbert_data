@@ -1,5 +1,4 @@
 import os
-import re
 from pathlib import Path
 import shutil
 from enum import Enum
@@ -20,11 +19,6 @@ class PredictionType(Enum):
     BINARY = "binary"
     MULTICLASS = "multiclass"
     REGRESSION = "regression"
-
-
-def get_temp_folder(args, table_name):
-    cleaned_cohort_name = re.sub(r'[^A-Za-z0-9]', '_', args.cohort_name)
-    return os.path.join(args.output_folder, f"{cleaned_cohort_name}_{table_name}")
 
 
 def create_feature_extraction_args():
@@ -91,7 +85,9 @@ def main(args):
     cohort_csv = cohort_csv.withColumn("cohort_member_id", cohort_member_id_udf)
 
     # Save cohort as parquet files
-    cohort_temp_folder = get_temp_folder(args, "cohort")
+    cohort_temp_folder = os.path.join(
+        args.output_folder, args.cohort_name, "cohort"
+    )
     cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
 
@@ -111,56 +107,100 @@ def main(args):
     ehr_records = cohort.select("person_id", "cohort_member_id", "index_date").join(
         ehr_records,
         "person_id"
-    ).where(ehr_records["date"] <= cohort["index_date"])
-
-    ehr_records_temp_folder = get_temp_folder(args, "ehr_records")
-    ehr_records.repartition("person_id").write.mode("overwrite").parquet(ehr_records_temp_folder)
+    ).where(ehr_records["datetime"] <= cohort["index_date"])
+    ehr_records_temp_folder = os.path.join(
+        args.output_folder, args.cohort_name, "ehr_records"
+    )
+    ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
     ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     cohort_visit_occurrence = visit_occurrence.join(
-        cohort.select("person_id").distinct(),
+        cohort.select("person_id", "cohort_member_id", "index_date"),
         "person_id"
     ).withColumn(
+        "visit_start_date",
+        f.col("visit_start_date").cast(t.DateType())
+    ).withColumn(
         "visit_end_date",
-        f.coalesce(f.col("visit_end_date"), f.col("visit_start_date"))
+        f.coalesce(f.col("visit_end_date"), f.col("visit_start_date")).cast(t.DateType())
+    ).withColumn(
+        "visit_start_datetime",
+        f.col("visit_start_datetime").cast(t.TimestampType())
     ).withColumn(
         "visit_end_datetime",
         f.coalesce(
             f.col("visit_end_datetime"),
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
-        )
+        ).cast(t.TimestampType())
+    ).where(
+        f.col("visit_start_datetime") <= f.col("index_date")
     )
+
     # For each patient/index_date pair, we get the last record before the index_date
     # we get the corresponding visit_occurrence_id and index_date
     if args.bound_visit_end_date:
         cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
-            "order", f.row_number().over(Window.orderBy(f.monotonically_increasing_id()))
+            "time_diff_from_index_date",
+            f.abs(f.unix_timestamp("index_date") - f.unix_timestamp("visit_start_datetime"))
+        ).withColumn(
+            "visit_rank",
+            f.row_number().over(
+                Window.partitionBy("person_id", "cohort_member_id").orderBy("time_diff_from_index_date")
+            )
+        ).drop("time_diff_from_index_date")
+
+        # We create placeholder tokens for those inpatient visits, where the first token occurs after the index_date
+        placeholder_tokens = cohort_visit_occurrence.where(
+            f.col("visit_rank") == 1
+        ).select(
+            "person_id",
+            "cohort_member_id",
+            "index_date",
+            "visit_occurrence_id",
+            f.lit("0").alias("standard_concept_id"),
+            f.col("index_date").cast(t.DateType()).alias("date"),
+            f.col("index_date").alias("datetime"),
+            f.lit("unknown").alias("domain"),
+            f.lit(None).cast(t.StringType()).alias("unit"),
+            f.lit(None).cast(t.FloatType()).alias("number_as_value"),
+            f.lit(None).cast(t.StringType()).alias("concept_as_value"),
+            f.lit(None).cast(t.StringType()).alias("event_group_id"),
+            "visit_concept_id",
+            f.lit(-1).alias("age")
+        ).join(
+            ehr_records.select("cohort_member_id", "visit_occurrence_id"),
+            ["cohort_member_id", "visit_occurrence_id"],
+            "left_anti",
         )
 
-        visit_index_date = cohort_visit_occurrence.alias("visit").join(
-            cohort.alias("cohort"),
-            "person_id"
-        ).where(
-            f.col("cohort.index_date").between(f.col("visit.visit_start_datetime"), f.col("visit.visit_end_datetime"))
-        ).select(
-            f.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
-            f.col("cohort.index_date").alias("index_date"),
+        placeholder_tokens.write.mode("overwrite").parquet(
+            os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
+        )
+        # Add an artificial token for the visit in which the prediction is made
+        ehr_records = ehr_records.unionByName(
+            placeholder_tokens
         )
 
         # Bound the visit_end_date and visit_end_datetime
-        cohort_visit_occurrence = cohort_visit_occurrence.join(
-            visit_index_date,
-            "visit_occurrence_id",
-            "left_outer",
+        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
+            "visit_end_datetime",
+            f.when(
+                f.col("visit_end_datetime") > f.col("index_date"),
+                f.col("index_date")
+            ).otherwise(f.col("visit_end_datetime"))
         ).withColumn(
             "visit_end_date",
-            f.coalesce(f.col("index_date").cast(t.DateType()), f.col("visit_end_date"))
-        ).withColumn(
-            "visit_end_datetime",
-            f.coalesce(f.col("index_date"), f.col("visit_end_datetime"))
-        ).orderBy(f.col("order")).drop("order")
+            f.col("visit_end_datetime").cast(t.DateType())
+        )
+        cohort_member_visit_folder = os.path.join(
+            args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
+        )
+        cohort_visit_occurrence.write.mode("overwrite").parquet(
+            cohort_member_visit_folder
+        )
+        cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -195,7 +235,9 @@ def main(args):
             inpatient_att_type=AttType(args.inpatient_att_type),
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group,
-            include_inpatient_hour_token=args.include_inpatient_hour_token
+            include_inpatient_hour_token=args.include_inpatient_hour_token,
+            spark=spark,
+            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(
@@ -250,12 +292,6 @@ def main(args):
         shutil.rmtree(os.path.join(cohort_folder, "temp"))
     else:
         cohort.write.mode("overwrite").parquet(cohort_folder)
-
-    if os.path.exists(cohort_temp_folder):
-        shutil.rmtree(cohort_temp_folder)
-
-    if os.path.exists(ehr_records_temp_folder):
-        shutil.rmtree(ehr_records_temp_folder)
 
     spark.stop()
 

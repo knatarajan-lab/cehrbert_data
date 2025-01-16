@@ -1,10 +1,10 @@
+import os.path
+
 from ..const.common import (
     MEASUREMENT,
     CATEGORICAL_MEASUREMENT,
-    MEASUREMENT_QUESTION_PREFIX,
-    MEASUREMENT_ANSWER_PREFIX
 )
-from pyspark.sql import DataFrame, functions as F, Window as W, types as T
+from pyspark.sql import SparkSession, DataFrame, functions as F, Window as W, types as T
 
 from .patient_event_decorator_base import PatientEventDecorator
 from .token_priority import DEFAULT_PRIORITY
@@ -17,8 +17,12 @@ class ClinicalEventDecorator(PatientEventDecorator):
     #     'concept_value_masks', 'value_as_numbers', 'value_as_concepts', 'mlm_skip_values',
     #     'visit_concept_ids', "units"
     # ]
-    def __init__(self, visit_occurrence):
+    def __init__(self, visit_occurrence, spark: SparkSession = None, persistence_folder: str = None):
         self._visit_occurrence = visit_occurrence
+        super().__init__(spark=spark, persistence_folder=persistence_folder)
+
+    def get_name(self):
+        return "clinical_events"
 
     def _decorate(self, patient_events: DataFrame):
         """
@@ -43,10 +47,18 @@ class ClinicalEventDecorator(PatientEventDecorator):
         visit_segment_udf = F.col("visit_rank_order") % F.lit(2) + 1
 
         # The visit records are joined to the cohort members (there could be multiple entries for the same patient)
-        # if multiple entries are present, we duplicate the visit records for those.
+        # if multiple entries are present, we duplicate the visit records for those. If the visit_occurrence dataframe
+        # contains visits for each cohort member, then we need to add cohort_member_id to the joined expression as well.
+        if "cohort_member_id" in self._visit_occurrence.columns:
+            joined_expr = ["visit_occurrence_id", "cohort_member_id"]
+        else:
+            joined_expr = ["visit_occurrence_id"]
+
         visits = (
-            self._visit_occurrence.join(valid_visit_ids, "visit_occurrence_id")
-            .select(
+            self._visit_occurrence.join(
+                valid_visit_ids,
+                joined_expr
+            ).select(
                 "person_id",
                 "cohort_member_id",
                 "visit_occurrence_id",
@@ -90,6 +102,15 @@ class ClinicalEventDecorator(PatientEventDecorator):
             ),
         ).otherwise(F.col("visit_start_date"))
 
+        # We need to set the visit_start_datetime at the beginning of the visit start date
+        # because there could be outpatient visit records whose visit_start_datetime is set to the end of the day
+        visit_start_datetime_udf = (
+            F.when(
+                F.col("is_inpatient") == 0,
+                F.col("visit_start_date")
+            ).otherwise(F.col("visit_start_datetime"))
+        ).cast(T.TimestampType())
+
         # We need to bound the medical event dates between visit_start_date and visit_end_date
         bound_medical_event_date = F.when(
             F.col("date") < F.col("visit_start_date"), F.col("visit_start_date")
@@ -108,8 +129,10 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         patient_events = (
             patient_events.join(visits, ["cohort_member_id", "visit_occurrence_id"])
+            .withColumn("datetime", F.to_timestamp("datetime"))
+            .withColumn("visit_start_datetime", visit_start_datetime_udf)
             .withColumn("visit_end_date", visit_end_date_udf)
-            .withColumn("visit_end_datetime", F.date_add("visit_end_date", 1))
+            .withColumn("visit_end_datetime", F.date_add("visit_end_date", 1).cast(T.TimestampType()))
             .withColumn("visit_end_datetime", F.expr("visit_end_datetime - INTERVAL 1 MINUTE"))
             .withColumn("date", bound_medical_event_date)
             .withColumn("datetime", bound_medical_event_datetime)
@@ -144,5 +167,11 @@ class ClinicalEventDecorator(PatientEventDecorator):
 
         if "concept_as_value" not in patient_events.schema.fieldNames():
             patient_events = patient_events.withColumn("concept_as_value", F.lit(None).cast("string"))
+
+        # Try persisting the clinical events
+        patient_events = self.try_persist_data(
+            patient_events,
+            self.get_name()
+        )
 
         return patient_events

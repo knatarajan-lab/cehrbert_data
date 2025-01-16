@@ -1,4 +1,6 @@
-from pyspark.sql import DataFrame, functions as F, types as T, Window as W
+import os.path
+
+from pyspark.sql import SparkSession, DataFrame, functions as F, types as T, Window as W
 
 from ..const.common import NA
 from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN
@@ -26,6 +28,8 @@ class AttEventDecorator(PatientEventDecorator):
             att_type: AttType,
             inpatient_att_type: AttType,
             include_inpatient_hour_token: bool = False,
+            spark: SparkSession = None,
+            persistence_folder: str = None,
     ):
         self._visit_occurrence = visit_occurrence
         self._include_visit_type = include_visit_type
@@ -33,6 +37,10 @@ class AttEventDecorator(PatientEventDecorator):
         self._att_type = att_type
         self._inpatient_att_type = inpatient_att_type
         self._include_inpatient_hour_token = include_inpatient_hour_token
+        super().__init__(spark=spark, persistence_folder=persistence_folder)
+
+    def get_name(self):
+        return "att_events"
 
     def _decorate(self, patient_events: DataFrame):
         if self._att_type == AttType.NONE:
@@ -53,9 +61,21 @@ class AttEventDecorator(PatientEventDecorator):
             F.max("concept_order").alias("max_concept_order"),
         )
 
+        # The visit records are joined to the cohort members (there could be multiple entries for the same patient)
+        # if multiple entries are present, we duplicate the visit records for those. If the visit_occurrence dataframe
+        # contains visits for each cohort member, then we need to add cohort_member_id to the joined expression as well.
+        if "cohort_member_id" in self._visit_occurrence.columns:
+            joined_expr = ["person_id", "cohort_member_id"]
+        else:
+            joined_expr = ["person_id"]
+
         visit_occurrence = (
-            self._visit_occurrence.select(
+            self._visit_occurrence.join(
+                cohort_member_person_pair,
+                joined_expr
+            ).select(
                 "person_id",
+                "cohort_member_id",
                 F.col("visit_start_date").cast(T.DateType()).alias("date"),
                 F.col("visit_start_date").cast(T.DateType()).alias("visit_start_date"),
                 F.col("visit_start_datetime").cast(T.TimestampType()).alias("visit_start_datetime"),
@@ -71,8 +91,10 @@ class AttEventDecorator(PatientEventDecorator):
                 "age",
                 "discharged_to_concept_id",
             )
-            .join(valid_visit_ids, "visit_occurrence_id")
-            .join(cohort_member_person_pair, ["person_id", "cohort_member_id"])
+            .join(
+                valid_visit_ids,
+                ["visit_occurrence_id", "cohort_member_id"]
+            )
         )
 
         # We assume outpatient visits end on the same day, therefore we start visit_end_date to visit_start_date due
@@ -89,7 +111,10 @@ class AttEventDecorator(PatientEventDecorator):
         visit_occurrence = visit_occurrence.withColumn("date_in_week", weeks_since_epoch_udf)
 
         # Cache visit for faster processing
-        visit_occurrence.cache()
+        visit_occurrence = self.try_persist_data(
+            visit_occurrence,
+            os.path.join(self.get_name(), "visit_occurrence_temp"),
+        )
 
         visits = visit_occurrence.drop("discharged_to_concept_id")
 
@@ -180,6 +205,12 @@ class AttEventDecorator(PatientEventDecorator):
 
         artificial_tokens = artificial_tokens.drop("visit_end_date")
 
+        # Try persisting artificial events
+        artificial_tokens = self.try_persist_data(
+            artificial_tokens,
+            os.path.join(self.get_name(), "artificial_tokens"),
+        )
+
         # Retrieving the events that are ONLY linked to inpatient visits
         inpatient_visits = (
             visit_occurrence
@@ -235,8 +266,10 @@ class AttEventDecorator(PatientEventDecorator):
         # Add discharge events to the inpatient visits
         inpatient_events = inpatient_events.unionByName(discharge_events)
 
-        # Try caching the inpatient events
-        inpatient_events.cache()
+        # Try persisting the inpatient events for fasting processing
+        inpatient_events = self.try_persist_data(
+            inpatient_events, os.path.join(self.get_name(), "inpatient_events")
+        )
 
         # Get the prev days_since_epoch
         inpatient_prev_date_udf = F.lag("date").over(
@@ -285,11 +318,11 @@ class AttEventDecorator(PatientEventDecorator):
             # Create ATT tokens within the inpatient visits
             inpatient_att_events = (
                 inpatient_events.withColumn(
-                  "time_stamp_hour", F.hour("datetime")
+                    "time_stamp_hour", F.hour("datetime")
                 ).withColumn(
                     "is_span_boundary",
                     F.row_number().over(
-                        W.partitionBy("cohort_member_id", "visit_occurrence_id", "concept_order")
+                        W.partitionBy("cohort_member_id", "visit_occurrence_id")
                         .orderBy("priority", "date", "time_stamp_hour")
                     ),
                 )
@@ -343,6 +376,11 @@ class AttEventDecorator(PatientEventDecorator):
                 .drop("prev_date", "time_delta", "is_span_boundary")
             )
 
+        # Try persisting the inpatient att events
+        inpatient_att_events = self.try_persist_data(
+            inpatient_att_events, os.path.join(self.get_name(), "inpatient_att_events")
+        )
+
         self.validate(inpatient_events)
         self.validate(inpatient_att_events)
 
@@ -351,6 +389,10 @@ class AttEventDecorator(PatientEventDecorator):
             inpatient_visits.select("visit_occurrence_id", "cohort_member_id"),
             ["visit_occurrence_id", "cohort_member_id"],
             how="left_anti",
+        )
+        # Try persisting the other events
+        other_events = self.try_persist_data(
+            other_events, os.path.join(self.get_name(), "other_events")
         )
 
         patient_events = inpatient_events.unionByName(inpatient_att_events).unionByName(other_events)
