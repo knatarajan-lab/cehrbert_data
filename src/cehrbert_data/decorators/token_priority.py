@@ -21,3 +21,11 @@ def get_inpatient_token_priority() -> Column:
 
 def get_inpatient_att_token_priority() -> Column:
     return functions.col("priority") - 0.01
+
+
+def get_inpatient_hour_token_priority() -> Column:
+    """
+    The priority of inpatient_hour_token needs to be lower (larger value) than inpatient_att_token
+    :return:
+    """
+    return get_inpatient_att_token_priority() + 0.001
