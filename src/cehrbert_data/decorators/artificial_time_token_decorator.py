@@ -84,8 +84,8 @@ class AttEventDecorator(PatientEventDecorator):
                 "visit_concept_id",
                 "visit_occurrence_id",
                 F.lit("visit").alias("domain"),
-                F.lit(None).cast("float").alias("number_as_value"),
-                F.lit(None).cast("string").alias("concept_as_value"),
+                F.lit(0.0).cast("float").alias("number_as_value"),
+                F.lit("0").cast("string").alias("concept_as_value"),
                 F.lit(0).alias("is_numeric_type"),
                 F.lit(0).alias("concept_value_mask"),
                 F.lit(0).alias("mlm_skip_value"),
@@ -302,8 +302,8 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("visit_concept_order", F.col("visit_concept_order"))
             .withColumn("priority", get_inpatient_att_token_priority())
             .withColumn("concept_value_mask", F.lit(0))
-            .withColumn("number_as_value", F.lit(None).cast("float"))
-            .withColumn("concept_as_value", F.lit(None).cast("string"))
+            .withColumn("number_as_value", F.lit(0.0).cast("float"))
+            .withColumn("concept_as_value", F.lit("0").cast("string"))
             .withColumn("is_numeric_type", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
@@ -364,8 +364,8 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("visit_concept_order", F.col("visit_concept_order"))
                 .withColumn("priority", get_inpatient_hour_token_priority())
                 .withColumn("concept_value_mask", F.lit(0))
-                .withColumn("number_as_value", F.lit(None).cast("float"))
-                .withColumn("concept_as_value", F.lit(None).cast("string"))
+                .withColumn("number_as_value", F.lit(0.0).cast("float"))
+                .withColumn("concept_as_value", F.lit("0").cast("string"))
                 .withColumn("is_numeric_type", F.lit(0))
                 .withColumn("unit", F.lit(NA))
                 .withColumn("event_group_id", F.lit(NA))
