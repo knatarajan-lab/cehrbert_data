@@ -66,7 +66,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("visit_occurrence_id", artificial_visit_id)
             .withColumn("standard_concept_id", F.lit(DEATH_TOKEN))
             .withColumn("domain", F.lit("death"))
-            .withColumn("visit_rank_order", F.lit(1) + F.col("visit_rank_order"))
+            .withColumn("visit_rank_order", F.lit(100) + F.col("visit_rank_order"))
             .withColumn("priority", F.lit(DEATH_TOKEN_PRIORITY))
             .withColumn("event_group_id", F.lit(NA))
             .drop("max_visit_occurrence_id")
