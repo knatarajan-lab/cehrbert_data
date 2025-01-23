@@ -41,7 +41,12 @@ class DeathEventDecorator(PatientEventDecorator):
             death_records.where(F.col("standard_concept_id") == VE_TOKEN)
             .withColumn(
                 "record_rank",
-                F.row_number().over(W.partitionBy("person_id", "cohort_member_id").orderBy(F.desc("date"))),
+                F.row_number().over(
+                    W.partitionBy("person_id", "cohort_member_id").orderBy(
+                        F.desc("datetime"),
+                        F.desc("visit_rank_order")
+                    )
+                ),
             )
             .where(F.col("record_rank") == 1)
             .drop("record_rank")
