@@ -246,6 +246,7 @@ class BaseCohortBuilder(ABC):
     def _add_demographics(self, cohort: DataFrame):
         return (
             cohort.join(self._dependency_dict[PERSON], "person_id")
+            .withColumn("year_of_birth", F.coalesce(F.year("birth_datetime"), F.col("year_of_birth")))
             .withColumn("age", F.year("index_date") - F.col("year_of_birth"))
             .select(
                 F.col("person_id"),
