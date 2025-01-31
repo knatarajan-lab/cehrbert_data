@@ -368,6 +368,12 @@ def create_spark_args(parse: bool = True):
         choices=[e.value for e in AttType],
     )
     parser.add_argument(
+        "--include_inpatient_hour_token",
+        dest="include_inpatient_hour_token",
+        action="store_true",
+        help="Indicate whether we should insert the hour tokens within inpatient visits",
+    )
+    parser.add_argument(
         "--exclude_demographic",
         dest="exclude_demographic",
         action="store_true",
