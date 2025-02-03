@@ -777,6 +777,7 @@ def create_prediction_cohort(
             age_upper_bound=spark_args.age_upper_bound,
             prior_observation_period=0,
             post_observation_period=0,
+            continue_job=spark_args.continue_job,
         )
         .build()
         .load_cohort()
