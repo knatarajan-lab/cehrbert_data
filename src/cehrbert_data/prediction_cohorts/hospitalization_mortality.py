@@ -17,7 +17,7 @@ FROM
     SELECT
         v.person_id,
         v.visit_occurrence_id,
-        v.visit_end_date AS index_date,
+        v.visit_start_datetime + interval 24 hours AS index_date,
         CASE
             WHEN v.discharged_to_concept_id == 4216643 THEN 1
             ELSE 0
@@ -25,7 +25,9 @@ FROM
         ROW_NUMBER() OVER(PARTITION BY v.person_id ORDER BY DATE(v.visit_end_date) DESC) AS rn
     FROM global_temp.visit_occurrence AS v
     WHERE v.visit_concept_id IN (9201, 262) --inpatient, er-inpatient
-        AND v.visit_end_date IS NOT NULL
+        AND v.visit_end_datetime IS NOT NULL
+        -- the inpatient visit duration is greater than 48 hours
+        AND (unix_timestamp(v.visit_end_datetime) - unix_timestamp(v.visit_start_datetime)) / 3600  > 48 
 ) AS v
     WHERE v.rn = 1 AND v.index_date >= '{date_lower_bound}'
 """
