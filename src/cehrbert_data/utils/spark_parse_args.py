@@ -403,4 +403,10 @@ def create_spark_args(parse: bool = True):
         action="store_true",
         help="Indicate whether we want to generate the cohorts in the MEDS format",
     )
+    parser.add_argument(
+        "--cache_events",
+        dest="cache_events",
+        action="store_true",
+        help="Indicate whether we want to cache all patient events including ATT in the local folder",
+    )
     return parser.parse_args() if parse else parser

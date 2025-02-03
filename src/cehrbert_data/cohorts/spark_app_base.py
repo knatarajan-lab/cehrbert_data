@@ -316,6 +316,7 @@ class NestedCohortBuilder:
             single_contribution: bool = False,
             exclude_features: bool = True,
             meds_format: bool = False,
+            cache_events: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -361,6 +362,7 @@ class NestedCohortBuilder:
         self._single_contribution = single_contribution
         self._exclude_features = exclude_features
         self._meds_format = meds_format
+        self._cache_events = cache_events
 
         self.get_logger().info(
             f"cohort_name: {cohort_name}\n"
@@ -400,6 +402,7 @@ class NestedCohortBuilder:
             f"single_contribution: {single_contribution}\n"
             f"extract_features: {exclude_features}\n"
             f"meds_format: {meds_format}\n"
+            f"cache_events: {cache_events}\n"
         )
 
         self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
@@ -704,8 +707,8 @@ class NestedCohortBuilder:
                 exclude_demographic=self._exclude_demographic,
                 use_age_group=self._use_age_group,
                 include_inpatient_hour_token=self._include_inpatient_hour_token,
-                spark=self.spark,
-                persistence_folder=self._output_data_folder,
+                spark=self.spark if self._cache_events else None,
+                persistence_folder=self._output_data_folder if self._cache_events else None,
             )
 
         return create_sequence_data(
