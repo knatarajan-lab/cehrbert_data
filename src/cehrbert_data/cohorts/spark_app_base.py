@@ -570,9 +570,16 @@ class NestedCohortBuilder:
         # if patient_splits is provided, we will
         if self._patient_splits_folder:
             patient_splits = self.spark.read.parquet(self._patient_splits_folder)
-            cohort.join(patient_splits, "person_id").orderBy("person_id", "cohort_member_id").write.mode(
+            cohort.join(
+                patient_splits,
+                cohort[person_id_column] == patient_splits.person_id
+            ).select(
+                [cohort[c] for c in cohort.columns] + [patient_splits.split]
+            ).orderBy(person_id_column, index_date_column).write.mode(
                 "overwrite"
-            ).parquet(os.path.join(self._output_data_folder, "temp"))
+            ).parquet(
+                os.path.join(self._output_data_folder, "temp")
+            )
             # Reload the data from the disk
             cohort = self.spark.read.parquet(os.path.join(self._output_data_folder, "temp"))
             cohort.where('split="train"').write.mode("overwrite").parquet(
