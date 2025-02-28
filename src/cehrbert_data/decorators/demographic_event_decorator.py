@@ -49,8 +49,8 @@ class DemographicEventDecorator(PatientEventDecorator):
         patient_first_token = (
             patient_events.withColumn("token_order", first_token_udf)
             .withColumn("concept_value_mask", F.lit(0))
-            .withColumn("number_as_value", F.lit(None).cast("float"))
-            .withColumn("concept_as_value", F.lit(None).cast("string"))
+            .withColumn("number_as_value", F.lit(0.0).cast("float"))
+            .withColumn("concept_as_value", F.lit("0").cast("string"))
             .withColumn("is_numeric_type", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))

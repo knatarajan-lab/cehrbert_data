@@ -41,7 +41,12 @@ class DeathEventDecorator(PatientEventDecorator):
             death_records.where(F.col("standard_concept_id") == VE_TOKEN)
             .withColumn(
                 "record_rank",
-                F.row_number().over(W.partitionBy("person_id", "cohort_member_id").orderBy(F.desc("date"))),
+                F.row_number().over(
+                    W.partitionBy("person_id", "cohort_member_id").orderBy(
+                        F.desc("datetime"),
+                        F.desc("visit_rank_order")
+                    )
+                ),
             )
             .where(F.col("record_rank") == 1)
             .drop("record_rank")
@@ -61,7 +66,7 @@ class DeathEventDecorator(PatientEventDecorator):
             .withColumn("visit_occurrence_id", artificial_visit_id)
             .withColumn("standard_concept_id", F.lit(DEATH_TOKEN))
             .withColumn("domain", F.lit("death"))
-            .withColumn("visit_rank_order", F.lit(1) + F.col("visit_rank_order"))
+            .withColumn("visit_rank_order", F.lit(100) + F.col("visit_rank_order"))
             .withColumn("priority", F.lit(DEATH_TOKEN_PRIORITY))
             .withColumn("event_group_id", F.lit(NA))
             .drop("max_visit_occurrence_id")
