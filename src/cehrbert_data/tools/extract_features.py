@@ -286,7 +286,7 @@ def main(args):
         cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(cohort_folder, "test"))
         shutil.rmtree(os.path.join(cohort_folder, "temp"))
     else:
-        cohort.write.mode("overwrite").parquet(cohort_folder)
+        cohort.write.mode("overwrite").parquet(os.path.join(cohort_folder, "task_labels"))
 
     spark.stop()
 
