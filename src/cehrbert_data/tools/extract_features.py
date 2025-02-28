@@ -51,11 +51,6 @@ def create_feature_extraction_args():
         '--bound_visit_end_date',
         action='store_true',
     )
-    spark_args.add_argument(
-        "--include_inpatient_hour_token",
-        dest="include_inpatient_hour_token",
-        action="store_true",
-    )
     return spark_args.parse_args()
 
 
