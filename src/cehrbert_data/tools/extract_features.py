@@ -103,11 +103,13 @@ def main(args):
         ehr_records,
         "person_id"
     ).where(ehr_records["datetime"] <= cohort["index_date"])
-    ehr_records_temp_folder = os.path.join(
-        args.output_folder, args.cohort_name, "ehr_records"
-    )
-    ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
-    ehr_records = spark.read.parquet(ehr_records_temp_folder)
+
+    if args.cache_events:
+        ehr_records_temp_folder = os.path.join(
+            args.output_folder, args.cohort_name, "ehr_records"
+        )
+        ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
+        ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     cohort_visit_occurrence = visit_occurrence.join(
@@ -170,9 +172,10 @@ def main(args):
             "left_anti",
         )
 
-        placeholder_tokens.write.mode("overwrite").parquet(
-            os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
-        )
+        if args.cache_events:
+            placeholder_tokens.write.mode("overwrite").parquet(
+                os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
+            )
         # Add an artificial token for the visit in which the prediction is made
         ehr_records = ehr_records.unionByName(
             placeholder_tokens
@@ -189,13 +192,14 @@ def main(args):
             "visit_end_date",
             f.col("visit_end_datetime").cast(t.DateType())
         )
-        cohort_member_visit_folder = os.path.join(
-            args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
-        )
-        cohort_visit_occurrence.write.mode("overwrite").parquet(
-            cohort_member_visit_folder
-        )
-        cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
+        if args.cache_events:
+            cohort_member_visit_folder = os.path.join(
+                args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
+            )
+            cohort_visit_occurrence.write.mode("overwrite").parquet(
+                cohort_member_visit_folder
+            )
+            cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -231,8 +235,8 @@ def main(args):
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group,
             include_inpatient_hour_token=args.include_inpatient_hour_token,
-            spark=spark,
-            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
+            spark=spark if args.cache_events else None,
+            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)) if args.cache_events else None,
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(
