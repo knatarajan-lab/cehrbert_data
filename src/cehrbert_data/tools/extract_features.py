@@ -62,28 +62,41 @@ def main(args):
         f"Extract Features for existing cohort {args.cohort_name}"
     ).getOrCreate()
 
-    cohort_csv = spark.read. \
-        option("header", "true"). \
-        option("inferSchema", "true"). \
-        csv(args.cohort_dir). \
-        withColumnRenamed(args.person_id_column, "person_id"). \
-        withColumnRenamed(args.index_date_column, "index_date"). \
-        withColumnRenamed(args.label_column, "label"). \
-        withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
+    cohort_dir = os.path.expanduser(args.cohort_dir)
+    is_parquet = False
+    if os.path.isdir(cohort_dir):
+        is_parquet = True
+    else:
+        file_extension = os.path.splitext(cohort_path)[1]
+        if file_extension.lower() == ".parquet":
+            is_parquet = True
+
+    if is_parquet:
+        cohort = spark.read.parquet(cohort_dir)
+    else:
+        cohort = spark.read. \
+            option("header", "true"). \
+            option("inferSchema", "true"). \
+            csv(args.cohort_dir)
+
+    cohort = cohort.withColumnRenamed(args.person_id_column, "person_id"). \
+            withColumnRenamed(args.index_date_column, "index_date"). \
+            withColumnRenamed(args.label_column, "label"). \
+            withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
 
     if PredictionType.REGRESSION:
-        cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.FloatType()))
+        cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
     else:
-        cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.IntegerType()))
+        cohort = cohort.withColumn("label", f.col("label").cast(t.IntegerType()))
 
     cohort_member_id_udf = f.row_number().over(Window.orderBy("person_id", "index_date"))
-    cohort_csv = cohort_csv.withColumn("cohort_member_id", cohort_member_id_udf)
+    cohort = cohort.withColumn("cohort_member_id", cohort_member_id_udf)
 
     # Save cohort as parquet files
     cohort_temp_folder = os.path.join(
         args.output_folder, args.cohort_name, "cohort"
     )
-    cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
+    cohort.write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
 
     ehr_records = extract_ehr_records(
