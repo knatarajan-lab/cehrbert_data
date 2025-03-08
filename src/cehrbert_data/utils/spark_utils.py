@@ -733,7 +733,8 @@ def create_sequence_data_with_att(
             cohort_index,
             ["person_id", "cohort_member_id"]
         ).where(
-            patient_events["datetime"] <= cohort_index["index_date"]
+            (patient_events["datetime"] <= cohort_index["index_date"]) |
+            (patient_events["standard_concept_id"] == "[END]")
         ).drop(
             "index_date"
         )
