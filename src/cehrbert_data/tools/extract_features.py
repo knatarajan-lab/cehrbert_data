@@ -47,10 +47,6 @@ def create_feature_extraction_args():
         required=False,
         default=PredictionType.BINARY
     )
-    spark_args.add_argument(
-        '--bound_visit_end_date',
-        action='store_true',
-    )
     return spark_args.parse_args()
 
 
@@ -148,71 +144,6 @@ def main(args):
         f.col("visit_start_datetime") <= f.col("index_date")
     )
 
-    # For each patient/index_date pair, we get the last record before the index_date
-    # we get the corresponding visit_occurrence_id and index_date
-    if args.bound_visit_end_date:
-        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
-            "time_diff_from_index_date",
-            f.abs(f.unix_timestamp("index_date") - f.unix_timestamp("visit_start_datetime"))
-        ).withColumn(
-            "visit_rank",
-            f.row_number().over(
-                Window.partitionBy("person_id", "cohort_member_id").orderBy("time_diff_from_index_date")
-            )
-        ).drop("time_diff_from_index_date")
-
-        # We create placeholder tokens for those inpatient visits, where the first token occurs after the index_date
-        placeholder_tokens = cohort_visit_occurrence.where(
-            f.col("visit_rank") == 1
-        ).select(
-            "person_id",
-            "cohort_member_id",
-            "index_date",
-            "visit_occurrence_id",
-            f.lit("0").alias("standard_concept_id"),
-            f.col("index_date").cast(t.DateType()).alias("date"),
-            f.col("index_date").alias("datetime"),
-            f.lit("unknown").alias("domain"),
-            f.lit(None).cast(t.StringType()).alias("unit"),
-            f.lit(None).cast(t.FloatType()).alias("number_as_value"),
-            f.lit(None).cast(t.StringType()).alias("concept_as_value"),
-            f.lit(None).cast(t.StringType()).alias("event_group_id"),
-            "visit_concept_id",
-            f.lit(-1).alias("age")
-        ).join(
-            ehr_records.select("cohort_member_id", "visit_occurrence_id"),
-            ["cohort_member_id", "visit_occurrence_id"],
-            "left_anti",
-        )
-
-        if args.cache_events:
-            placeholder_tokens.write.mode("overwrite").parquet(
-                os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
-            )
-        # Add an artificial token for the visit in which the prediction is made
-        ehr_records = ehr_records.unionByName(
-            placeholder_tokens
-        )
-
-        # Bound the visit_end_date and visit_end_datetime
-        cohort_visit_occurrence = cohort_visit_occurrence.withColumn(
-            "visit_end_datetime",
-            f.when(
-                f.col("visit_end_datetime") > f.col("index_date"),
-                f.col("index_date")
-            ).otherwise(f.col("visit_end_datetime"))
-        ).withColumn(
-            "visit_end_date",
-            f.col("visit_end_datetime").cast(t.DateType())
-        )
-        if args.cache_events:
-            cohort_member_visit_folder = os.path.join(
-                args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
-            )
-            cohort_visit_occurrence.write.mode("overwrite").parquet(
-                cohort_member_visit_folder
-            )
-            cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -248,8 +179,9 @@ def main(args):
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group,
             include_inpatient_hour_token=args.include_inpatient_hour_token,
-            spark=spark if args.cache_events else None,
-            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)) if args.cache_events else None,
+            cohort_index=cohort.select("person_id", "cohort_member_id", "index_date"),
+            spark=spark,
+            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(
