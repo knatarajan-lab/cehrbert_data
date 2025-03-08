@@ -32,6 +32,7 @@ from cehrbert_data.decorators import (
     DemographicEventDecorator,
     AttEventDecorator,
     ClinicalEventDecorator,
+    PredictionEventDecorator,
     time_token_func,
 )
 
@@ -710,6 +711,7 @@ def create_sequence_data_with_att(
             persistence_folder=persistence_folder
         ),
         DeathEventDecorator(death, att_type, spark=spark, persistence_folder=persistence_folder),
+        PredictionEventDecorator(cohort_index, spark=spark, persistence_folder=persistence_folder),
     ]
 
     if not exclude_demographic:
