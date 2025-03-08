@@ -557,7 +557,8 @@ class NestedCohortBuilder:
             observation_period = self._dependency_dict[OBSERVATION_PERIOD]
             # Add time_to_event
             cohort = cohort.join(
-                observation_period.select("person_id", "observation_period_end_date"), "person_id"
+                observation_period.select("person_id", "observation_period_end_date"),
+                cohort[person_id_column] == observation_period["person_id"]
             ).withColumn(
                 "study_end_date",
                 F.coalesce(F.col("outcome_date"), F.col("observation_period_end_date"))
