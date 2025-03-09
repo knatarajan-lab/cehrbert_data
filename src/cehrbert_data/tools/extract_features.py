@@ -1,4 +1,5 @@
 import os
+import glob
 from pathlib import Path
 import shutil
 from enum import Enum
@@ -68,7 +69,8 @@ def main(args):
             is_parquet = True
 
     if is_parquet:
-        cohort = spark.read.parquet(cohort_dir)
+        all_files = glob.glob(os.path.join(cohort_dir, '**', '*.parquet'), recursive=True)
+        cohort = spark.read.parquet(*all_files)
     else:
         cohort = spark.read. \
             option("header", "true"). \
@@ -78,7 +80,8 @@ def main(args):
     cohort = cohort.withColumnRenamed(args.person_id_column, "person_id"). \
             withColumnRenamed(args.index_date_column, "index_date"). \
             withColumnRenamed(args.label_column, "label"). \
-            withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
+            withColumn("index_date", f.col("index_date").cast(t.TimestampType())). \
+            select("person_id", "index_date", "label")
 
     if PredictionType.REGRESSION:
         cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
