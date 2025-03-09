@@ -62,28 +62,41 @@ def main(args):
         f"Extract Features for existing cohort {args.cohort_name}"
     ).getOrCreate()
 
-    cohort_csv = spark.read. \
-        option("header", "true"). \
-        option("inferSchema", "true"). \
-        csv(args.cohort_dir). \
-        withColumnRenamed(args.person_id_column, "person_id"). \
-        withColumnRenamed(args.index_date_column, "index_date"). \
-        withColumnRenamed(args.label_column, "label"). \
-        withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
+    cohort_dir = os.path.expanduser(args.cohort_dir)
+    is_parquet = False
+    if os.path.isdir(cohort_dir):
+        is_parquet = True
+    else:
+        file_extension = os.path.splitext(cohort_path)[1]
+        if file_extension.lower() == ".parquet":
+            is_parquet = True
+
+    if is_parquet:
+        cohort = spark.read.parquet(cohort_dir)
+    else:
+        cohort = spark.read. \
+            option("header", "true"). \
+            option("inferSchema", "true"). \
+            csv(args.cohort_dir)
+
+    cohort = cohort.withColumnRenamed(args.person_id_column, "person_id"). \
+            withColumnRenamed(args.index_date_column, "index_date"). \
+            withColumnRenamed(args.label_column, "label"). \
+            withColumn("index_date", f.col("index_date").cast(t.TimestampType()))
 
     if PredictionType.REGRESSION:
-        cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.FloatType()))
+        cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
     else:
-        cohort_csv = cohort_csv.withColumn("label", f.col("label").cast(t.IntegerType()))
+        cohort = cohort.withColumn("label", f.col("label").cast(t.IntegerType()))
 
     cohort_member_id_udf = f.row_number().over(Window.orderBy("person_id", "index_date"))
-    cohort_csv = cohort_csv.withColumn("cohort_member_id", cohort_member_id_udf)
+    cohort = cohort.withColumn("cohort_member_id", cohort_member_id_udf)
 
     # Save cohort as parquet files
     cohort_temp_folder = os.path.join(
         args.output_folder, args.cohort_name, "cohort"
     )
-    cohort_csv.write.mode("overwrite").parquet(cohort_temp_folder)
+    cohort.write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
 
     ehr_records = extract_ehr_records(
@@ -103,11 +116,13 @@ def main(args):
         ehr_records,
         "person_id"
     ).where(ehr_records["datetime"] <= cohort["index_date"])
-    ehr_records_temp_folder = os.path.join(
-        args.output_folder, args.cohort_name, "ehr_records"
-    )
-    ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
-    ehr_records = spark.read.parquet(ehr_records_temp_folder)
+
+    if args.cache_events:
+        ehr_records_temp_folder = os.path.join(
+            args.output_folder, args.cohort_name, "ehr_records"
+        )
+        ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
+        ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     cohort_visit_occurrence = visit_occurrence.join(
@@ -170,9 +185,10 @@ def main(args):
             "left_anti",
         )
 
-        placeholder_tokens.write.mode("overwrite").parquet(
-            os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
-        )
+        if args.cache_events:
+            placeholder_tokens.write.mode("overwrite").parquet(
+                os.path.join(args.output_folder, args.cohort_name, "placeholder_tokens")
+            )
         # Add an artificial token for the visit in which the prediction is made
         ehr_records = ehr_records.unionByName(
             placeholder_tokens
@@ -189,13 +205,14 @@ def main(args):
             "visit_end_date",
             f.col("visit_end_datetime").cast(t.DateType())
         )
-        cohort_member_visit_folder = os.path.join(
-            args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
-        )
-        cohort_visit_occurrence.write.mode("overwrite").parquet(
-            cohort_member_visit_folder
-        )
-        cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
+        if args.cache_events:
+            cohort_member_visit_folder = os.path.join(
+                args.output_folder, args.cohort_name, "cohort_member_visit_occurrence"
+            )
+            cohort_visit_occurrence.write.mode("overwrite").parquet(
+                cohort_member_visit_folder
+            )
+            cohort_visit_occurrence = spark.read.parquet(cohort_member_visit_folder).drop("visit_rank")
 
     birthdate_udf = f.coalesce(
         "birth_datetime",
@@ -231,8 +248,8 @@ def main(args):
             exclude_demographic=args.exclude_demographic,
             use_age_group=args.use_age_group,
             include_inpatient_hour_token=args.include_inpatient_hour_token,
-            spark=spark,
-            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
+            spark=spark if args.cache_events else None,
+            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)) if args.cache_events else None,
         )
     elif args.is_feature_concept_frequency:
         ehr_records = create_concept_frequency_data(
