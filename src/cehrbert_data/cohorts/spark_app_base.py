@@ -5,7 +5,6 @@ import shutil
 from abc import ABC
 from typing import List
 
-from numpy.random import permutation
 from pandas import to_datetime
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -559,10 +558,15 @@ class NestedCohortBuilder:
             cohort = cohort.join(
                 observation_period.select("person_id", "observation_period_end_date"),
                 cohort[person_id_column] == observation_period["person_id"]
+            ).select(
+                [cohort[c] for c in cohort.columns] +
+                [observation_period["observation_period_end_date"]]
             ).withColumn(
                 "study_end_date",
                 F.coalesce(F.col("outcome_date"), F.col("observation_period_end_date"))
-            ).drop("observation_period_end_date")
+            ).drop(
+                "observation_period_end_date"
+            )
         else:
             # Add time_to_event
             cohort = cohort.withColumn(
@@ -579,11 +583,11 @@ class NestedCohortBuilder:
         # if patient_splits is provided, we will
         if self._patient_splits_folder:
             patient_splits = self.spark.read.parquet(self._patient_splits_folder)
-            cohort.join(
-                patient_splits,
-                cohort[person_id_column] == patient_splits.person_id
+            cohort.alias("cohort").join(
+                patient_splits.alias("split"),
+                F.col(f"cohort.{person_id_column}") == F.col("split.person_id")
             ).select(
-                [cohort[c] for c in cohort.columns] + [patient_splits.split]
+                [F.col(f"cohort.{c}").alias(c) for c in cohort.columns] + [F.col("split.split").alias("split")]
             ).orderBy(person_id_column, index_date_column).write.mode(
                 "overwrite"
             ).parquet(
