@@ -32,6 +32,7 @@ from cehrbert_data.decorators import (
     DemographicEventDecorator,
     AttEventDecorator,
     ClinicalEventDecorator,
+    PredictionEventDecorator,
     time_token_func,
 )
 
@@ -669,6 +670,7 @@ def create_sequence_data_with_att(
         exclude_demographic: bool = True,
         use_age_group: bool = False,
         include_inpatient_hour_token: bool = False,
+        cohort_index: DataFrame = None,
         spark: SparkSession = None,
         persistence_folder: str = None,
 ):
@@ -687,6 +689,7 @@ def create_sequence_data_with_att(
     :param exclude_demographic:
     :param use_age_group:
     :param include_inpatient_hour_token:
+    :param cohort_index:
     :param spark: SparkSession
     :param persistence_folder: persistence folder for the temp data frames
 
@@ -708,6 +711,7 @@ def create_sequence_data_with_att(
             persistence_folder=persistence_folder
         ),
         DeathEventDecorator(death, att_type, spark=spark, persistence_folder=persistence_folder),
+        PredictionEventDecorator(cohort_index, spark=spark, persistence_folder=persistence_folder),
     ]
 
     if not exclude_demographic:
@@ -722,6 +726,18 @@ def create_sequence_data_with_att(
 
     for decorator in decorators:
         patient_events = decorator.decorate(patient_events)
+
+    # Make sure to ONLY keep the events before the index datetime if this is a prediction task
+    if cohort_index is not None:
+        patient_events = patient_events.join(
+            cohort_index,
+            ["person_id", "cohort_member_id"]
+        ).where(
+            (patient_events["datetime"] <= cohort_index["index_date"]) |
+            (patient_events["standard_concept_id"] == "[END]")
+        ).drop(
+            "index_date"
+        )
 
     # add randomness to the order of the concepts that have the same time stamp
     order_udf = F.row_number().over(
