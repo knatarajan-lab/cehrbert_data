@@ -69,6 +69,22 @@ DOMAIN_KEY_FIELDS = {
             "measurement"
         )
     ],
+    "observation_id": [
+        (
+            "observation_concept_id",
+            "observation_date",
+            "observation_datetime",
+            "observation"
+        )
+    ],
+    "device_exposure_id": [
+        (
+            "device_concept_id",
+            "device_exposure_start_date",
+            "device_exposure_start_datetime",
+            "device"
+        )
+    ],
     "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
