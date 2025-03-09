@@ -18,6 +18,7 @@ Command-line Arguments:
 """
 
 import os
+from typing import List
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -29,7 +30,13 @@ from cehrbert_data.utils.spark_utils import join_domain_tables, preprocess_domai
 DOMAIN_TABLE_LIST = ["condition_occurrence", "procedure_occurrence", "drug_exposure"]
 
 
-def main(input_folder, output_folder, min_num_of_patients, with_drug_rollup: bool = True):
+def main(
+        input_folder: str,
+        output_folder: str,
+        min_num_of_patients: int,
+        with_drug_rollup: bool = True,
+        ehr_table_list: List[str] = None
+):
     """
     Main function to generate a qualified concept list based on patient event data from multiple.
 
@@ -39,8 +46,9 @@ def main(input_folder, output_folder, min_num_of_patients, with_drug_rollup: boo
         input_folder (str): The directory where the input data is stored.
         output_folder (str): The directory where the output (qualified concept list) will be saved.
         min_num_of_patients (int): Minimum number of patients that a concept must be linked to for
-        nclusion.
+        inclusion.
         with_drug_rollup (bool): If True, applies drug rollup logic to the drug_exposure domain.
+        ehr_table_list (List[str]): List of patient event tables to include in the concept list.
 
     The function processes patient event data across various domain tables, excludes low-frequency
     concepts, and saves the filtered concepts to a specified output folder.
@@ -50,7 +58,8 @@ def main(input_folder, output_folder, min_num_of_patients, with_drug_rollup: boo
     domain_tables = []
     # Exclude measurement from domain_table_list if exists because we need to process measurement
     # in a different way
-    for domain_table_name in DOMAIN_TABLE_LIST:
+    domain_table_list = ehr_table_list if ehr_table_list else DOMAIN_TABLE_LIST
+    for domain_table_name in domain_table_list:
         if domain_table_name != MEASUREMENT:
             domain_tables.append(
                 preprocess_domain_table(
@@ -105,6 +114,14 @@ if __name__ == "__main__":
         required=False,
     )
     parser.add_argument("--with_drug_rollup", dest="with_drug_rollup", action="store_true")
+    parser.add_argument(
+        "--ehr_table_list",
+        dest="ehr_table_list",
+        nargs="+",
+        action="store",
+        help="The list of domain tables you want to include for feature extraction",
+        required=False,
+    )
 
     ARGS = parser.parse_args()
 
@@ -113,4 +130,5 @@ if __name__ == "__main__":
         ARGS.output_folder,
         ARGS.min_num_of_patients,
         ARGS.with_drug_rollup,
+        ARGS.ehr_table_list,
     )
