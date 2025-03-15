@@ -837,4 +837,5 @@ def create_prediction_cohort(
         single_contribution=spark_args.single_contribution,
         exclude_features=spark_args.exclude_features,
         meds_format=spark_args.meds_format,
+        cache_events=spark_args.cache_events,
     ).build()
