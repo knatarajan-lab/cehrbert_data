@@ -710,6 +710,7 @@ class NestedCohortBuilder:
                 include_inpatient_hour_token=self._include_inpatient_hour_token,
                 spark=self.spark if self._cache_events else None,
                 persistence_folder=self._output_data_folder if self._cache_events else None,
+                cohort_index=cohort.select("person_id", "cohort_member_id", "index_date")
             )
 
         return create_sequence_data(
