@@ -10,10 +10,14 @@ FROM
 (
     SELECT DISTINCT
         vo.person_id,
-        FIRST(DATE(vo.visit_start_date)) OVER (PARTITION BY po.person_id
-            ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS index_date,
-        FIRST(vo.visit_occurrence_id) OVER (PARTITION BY po.person_id
-            ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS visit_occurrence_id
+        vo.visit_occurrence_id,
+        coalesce(vo.visit_start_datetime, vo.visit_start_date) as index_date,
+        ROW_NUMBER() OVER(
+            PARTITION BY po.person_id
+            ORDER BY vo.visit_start_date,
+                vo.visit_start_datetime,
+                vo.visit_occurrence_id
+        ) as r_number
     FROM global_temp.procedure_occurrence AS po
     JOIN global_temp.visit_occurrence AS vo
         ON po.visit_occurrence_id = vo.visit_occurrence_id
@@ -23,7 +27,7 @@ FROM
         WHERE po.procedure_concept_id = ie.concept_id
     )
 ) c
-WHERE c.index_date >= '{date_lower_bound}'
+WHERE c.index_date >= '{date_lower_bound}' AND c.r_number = 1
 """
 
 DEFAULT_COHORT_NAME = "cabg"
