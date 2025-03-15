@@ -20,7 +20,7 @@ WITH hf_concepts AS (
 SELECT DISTINCT
     v.person_id,
     v.visit_occurrence_id,
-    v.visit_end_date AS index_date
+    COALESCE(v.visit_end_datetime, v.visit_end_date) AS index_date
 FROM global_temp.visit_occurrence AS v
 JOIN global_temp.condition_occurrence AS co
     ON v.visit_occurrence_id = co.visit_occurrence_id
@@ -37,7 +37,7 @@ HOSPITALIZATION_QUERY = """
 SELECT DISTINCT
     v.person_id,
     v.visit_occurrence_id,
-    v.visit_start_date AS index_date
+    COALESCE(v.visit_start_datetime, v.visit_start_date) AS index_date
 FROM global_temp.visit_occurrence AS v
 WHERE v.visit_concept_id IN (9201, 262, 8971, 8920) --inpatient, er-inpatient
 """
