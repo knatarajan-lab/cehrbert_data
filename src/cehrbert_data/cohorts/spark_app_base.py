@@ -633,25 +633,25 @@ class NestedCohortBuilder:
         # Only allow the data records that occurred between the index date and the prediction window
         if self._is_population_estimation:
             if self._is_prediction_window_unbounded:
-                record_window_filter = F.col("ehr.date") <= F.current_date()
+                record_window_filter = F.col("ehr.datetime") <= F.current_date()
             else:
-                record_window_filter = F.col("ehr.date") <= F.date_add(
+                record_window_filter = F.col("ehr.datetime") <= F.date_add(
                     F.col("cohort.index_date"), self._prediction_window
                 )
         else:
             # For patient level prediction, we remove all records post index date
             if self._is_observation_post_index:
-                record_window_filter = F.col("ehr.date").between(
+                record_window_filter = F.col("ehr.datetime").between(
                     F.col("cohort.index_date"),
                     F.date_add(F.col("cohort.index_date"), self._observation_window),
                 )
             else:
                 if self._is_observation_window_unbounded:
-                    record_window_filter = F.col("ehr.date") <= F.date_sub(
+                    record_window_filter = F.col("ehr.datetime") <= F.date_sub(
                         F.col("cohort.index_date"), self._hold_off_window
                     )
                 else:
-                    record_window_filter = F.col("ehr.date").between(
+                    record_window_filter = F.col("ehr.datetime").between(
                         F.date_sub(
                             F.col("cohort.index_date"),
                             self._observation_window + self._hold_off_window,
@@ -714,6 +714,7 @@ class NestedCohortBuilder:
                 include_inpatient_hour_token=self._include_inpatient_hour_token,
                 spark=self.spark if self._cache_events else None,
                 persistence_folder=self._output_data_folder if self._cache_events else None,
+                cohort_index=cohort.select("person_id", "cohort_member_id", "index_date")
             )
 
         return create_sequence_data(
