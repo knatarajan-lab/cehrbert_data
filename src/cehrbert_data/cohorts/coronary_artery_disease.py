@@ -21,10 +21,14 @@ FROM
 (
     SELECT DISTINCT
         vo.person_id,
-        FIRST(DATE(vo.visit_start_date)) OVER (PARTITION BY co.person_id
-            ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS index_date,
-        FIRST(vo.visit_occurrence_id) OVER (PARTITION BY co.person_id
-            ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS visit_occurrence_id
+        vo.visit_occurrence_id,
+        coalesce(vo.visit_start_datetime, vo.visit_start_date) as index_date,
+        ROW_NUMBER() OVER(
+            PARTITION BY po.person_id
+            ORDER BY vo.visit_start_date,
+                vo.visit_start_datetime,
+                vo.visit_occurrence_id
+        ) as r_number
     FROM global_temp.condition_occurrence AS co
     JOIN global_temp.visit_occurrence AS vo
         ON co.visit_occurrence_id = vo.visit_occurrence_id
@@ -41,7 +45,9 @@ WHERE NOT EXISTS (
     FROM prior_graft_stent AS exclusion
     WHERE exclusion.person_id = c.person_id
         AND c.index_date > exclusion.procedure_date
-) AND c.index_date >= '{date_lower_bound}'
+)
+    AND c.r_number = 1
+    AND c.index_date >= '{date_lower_bound}'
 """
 
 DEFAULT_COHORT_NAME = "coronary_artery_disease"
