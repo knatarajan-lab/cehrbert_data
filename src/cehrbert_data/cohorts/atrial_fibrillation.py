@@ -14,7 +14,7 @@ FROM
         vo.visit_occurrence_id,
         coalesce(vo.visit_start_datetime, vo.visit_start_date) as index_date,
         ROW_NUMBER() OVER(
-            PARTITION BY po.person_id
+            PARTITION BY vo.person_id
             ORDER BY vo.visit_start_date,
                 vo.visit_start_datetime,
                 vo.visit_occurrence_id
