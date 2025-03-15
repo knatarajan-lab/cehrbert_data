@@ -11,7 +11,7 @@ FROM
     SELECT
         v.person_id,
         v.visit_occurrence_id,
-        v.visit_end_date AS index_date,
+        coalesce(v.visit_end_datetime, v.visit_end_date) AS index_date,
         v.discharged_to_concept_id,
         ROW_NUMBER() OVER(PARTITION BY v.person_id ORDER BY DATE(v.visit_end_date) DESC) AS rn
     FROM global_temp.visit_occurrence AS v
