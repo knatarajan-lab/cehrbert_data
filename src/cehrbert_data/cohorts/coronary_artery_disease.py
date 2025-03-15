@@ -22,7 +22,7 @@ FROM
     SELECT DISTINCT
         vo.person_id,
         vo.visit_occurrence_id,
-        coalesce(vo.visit_start_datetime, vo.visit_start_date) as index_date,
+        coalesce(co.condition_start_datetime, vo.condition_start_date) as index_date,
         ROW_NUMBER() OVER(
             PARTITION BY vo.person_id
             ORDER BY vo.visit_start_date,
