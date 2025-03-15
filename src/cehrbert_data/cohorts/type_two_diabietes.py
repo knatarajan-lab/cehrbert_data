@@ -20,8 +20,7 @@ person_ids_to_exclude_observation AS
     JOIN global_temp.{observation_exclusion_concepts} AS oec
         ON o.observation_concept_id = oec.concept_id
 )
-SELECT
-    distinct
+SELECT DISTINCT
     c.person_id,
     c.index_date,
     c.visit_occurrence_id
@@ -29,10 +28,14 @@ FROM
 (
     SELECT DISTINCT
         vo.person_id,
-        FIRST(DATE(vo.visit_start_date)) OVER (PARTITION BY co.person_id
-            ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS index_date,
-        FIRST(vo.visit_occurrence_id) OVER (PARTITION BY co.person_id
-            ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS visit_occurrence_id
+        vo.visit_occurrence_id,
+        COALESCE(vo.visit_start_datetime, vo.visit_start_date) as index_date,
+        ROW_NUMBER() OVER(
+            PARTITION BY po.person_id
+            ORDER BY vo.visit_start_date,
+                vo.visit_start_datetime,
+                vo.visit_occurrence_id
+        ) as r_number
     FROM global_temp.condition_occurrence AS co
     JOIN global_temp.{diabetes_inclusion_concepts} AS ie
         ON co.condition_concept_id = ie.concept_id
@@ -43,7 +46,9 @@ JOIN person_ids_to_include_drug AS d
     ON c.person_id = d.person_id
 LEFT JOIN person_ids_to_exclude_observation AS eo
     ON c.person_id = eo.person_id AND c.index_date > eo.observation_date
-WHERE eo.person_id IS NULL AND c.index_date >= '{date_lower_bound}'
+WHERE eo.person_id IS NULL
+    AND c.r_number = 1 
+    AND c.index_date >= '{date_lower_bound}'
 """
 
 DIABETES_INCLUSION = [443238, 201820, 442793, 4016045]
