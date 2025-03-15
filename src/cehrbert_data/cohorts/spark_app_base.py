@@ -573,9 +573,7 @@ class NestedCohortBuilder:
                 "study_end_date",
                 F.coalesce(
                     F.col("outcome_date"),
-                    F.date_add(
-                        cohort[index_date_column], self._prediction_window
-                    )
+                    F.expr(f"{index_date_column} + INTERVAL {self._prediction_window} DAYS")
                 )
             )
         cohort = cohort.withColumn("time_to_event", F.datediff("study_end_date", index_date_column))
@@ -633,30 +631,28 @@ class NestedCohortBuilder:
         # Only allow the data records that occurred between the index date and the prediction window
         if self._is_population_estimation:
             if self._is_prediction_window_unbounded:
-                record_window_filter = F.col("ehr.datetime") <= F.current_date()
+                record_window_filter = F.col("ehr.datetime") <= F.current_timestamp()
             else:
-                record_window_filter = F.col("ehr.datetime") <= F.date_add(
-                    F.col("cohort.index_date"), self._prediction_window
+                record_window_filter = (
+                        F.col("ehr.datetime") <=
+                        F.expr(f"cohort.index_date + INTERVAL {self._prediction_window} DAYS")
                 )
         else:
             # For patient level prediction, we remove all records post index date
             if self._is_observation_post_index:
                 record_window_filter = F.col("ehr.datetime").between(
                     F.col("cohort.index_date"),
-                    F.date_add(F.col("cohort.index_date"), self._observation_window),
+                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS")
                 )
             else:
                 if self._is_observation_window_unbounded:
-                    record_window_filter = F.col("ehr.datetime") <= F.date_sub(
-                        F.col("cohort.index_date"), self._hold_off_window
+                    record_window_filter = (
+                        F.col("ehr.datetime") <= F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS")
                     )
                 else:
                     record_window_filter = F.col("ehr.datetime").between(
-                        F.date_sub(
-                            F.col("cohort.index_date"),
-                            self._observation_window + self._hold_off_window,
-                        ),
-                        F.date_sub(F.col("cohort.index_date"), self._hold_off_window),
+                        F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS"),
                     )
 
         # Somehow the dataframe join does not work without using the alias
