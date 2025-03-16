@@ -621,6 +621,15 @@ class NestedCohortBuilder:
             aggregate_by_hour=self._aggregate_by_hour,
         )
 
+        if self._cache_events:
+            all_patient_events_dir = os.path.join(self._output_data_folder, "all_patient_events")
+            ehr_records.write.mode("overwrite").parquet(
+                all_patient_events_dir
+            )
+            ehr_records = self.spark.read.parquet(
+                all_patient_events_dir
+            )
+
         # Duplicate the records for cohorts that allow multiple entries
         ehr_records = ehr_records.alias("ehr").join(
             cohort.alias("cohort"), F.col("ehr.person_id") == F.col("cohort.person_id")
@@ -635,7 +644,7 @@ class NestedCohortBuilder:
             else:
                 record_window_filter = (
                         F.col("ehr.datetime") <=
-                        F.expr(f"cohort.index_date + INTERVAL {self._prediction_window} DAYS")
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS")
                 )
         else:
             # For patient level prediction, we remove all records post index date
