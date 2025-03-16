@@ -114,6 +114,9 @@ def main(args):
     ehr_records = cohort.select("person_id", "cohort_member_id", "index_date").join(
         ehr_records,
         "person_id"
+    ).withColumn(
+        "index_date",
+        f.expr("index_date + INTERVAL 0.1 SECOND")
     ).where(ehr_records["datetime"] <= cohort["index_date"])
 
     if args.cache_events:

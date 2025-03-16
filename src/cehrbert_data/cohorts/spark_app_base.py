@@ -644,24 +644,25 @@ class NestedCohortBuilder:
             else:
                 record_window_filter = (
                         F.col("ehr.datetime") <=
-                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS")
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                 )
         else:
             # For patient level prediction, we remove all records post index date
             if self._is_observation_post_index:
                 record_window_filter = F.col("ehr.datetime").between(
                     F.col("cohort.index_date"),
-                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS")
+                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS + INTERVAL 0.1 SECOND")
                 )
             else:
                 if self._is_observation_window_unbounded:
                     record_window_filter = (
-                        F.col("ehr.datetime") <= F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS")
+                        F.col("ehr.datetime")
+                        <= F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                     )
                 else:
                     record_window_filter = F.col("ehr.datetime").between(
                         F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
-                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS"),
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND"),
                     )
 
         # Somehow the dataframe join does not work without using the alias
