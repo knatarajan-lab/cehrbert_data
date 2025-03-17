@@ -916,6 +916,14 @@ def construct_artificial_visits(
         ).otherwise(
             F.lit(None).cast(T.IntegerType())
         )
+    ).withColumn(
+        "visit_concept_id",
+        F.when(
+            F.col("visit_occurrence_id").isNotNull(),
+            F.col("visit_concept_id")
+        ).otherwise(
+            F.lit(0).cast(T.IntegerType())
+        )
     ).drop(
         "visit_start_lower_bound", "visit_end_upper_bound"
     )
