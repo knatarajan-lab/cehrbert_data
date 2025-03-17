@@ -22,6 +22,7 @@ from cehrbert_data.utils.spark_utils import (
     preprocess_domain_table,
     get_measurement_table,
     validate_table_names,
+    construct_artificial_visits
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -94,6 +95,7 @@ def main(
         "visit_start_date",
         "visit_start_datetime",
         "visit_end_date",
+        "visit_end_datetime",
         "visit_concept_id",
         "person_id",
         "discharged_to_concept_id",
@@ -158,6 +160,14 @@ def main(
         patient_events.write.mode("overwrite").parquet(os.path.join(output_folder, "all_patient_events"))
 
     patient_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
+
+    # Construct artificial visits or re-link the visits for the problem list events
+    patient_events, visit_occurrence_person = construct_artificial_visits(
+        patient_events,
+        visit_occurrence_person,
+        spark=spark,
+        persistence_folder=output_folder,
+    )
 
     if is_new_patient_representation:
         sequence_data = create_sequence_data_with_att(
