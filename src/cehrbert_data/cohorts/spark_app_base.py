@@ -600,7 +600,9 @@ class NestedCohortBuilder:
             cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(self._output_data_folder, "test"))
             shutil.rmtree(os.path.join(self._output_data_folder, "temp"))
         else:
-            cohort.orderBy(person_id_column, index_date_column).write.mode("overwrite").parquet(self._output_data_folder)
+            cohort.orderBy(person_id_column, index_date_column).write.mode("overwrite").parquet(
+                os.path.join(self._output_data_folder, "data")
+            )
 
     def extract_ehr_records_for_cohort(self, cohort: DataFrame):
         """
