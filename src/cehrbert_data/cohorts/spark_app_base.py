@@ -622,15 +622,6 @@ class NestedCohortBuilder:
             aggregate_by_hour=self._aggregate_by_hour,
         )
 
-        ehr_records, visit_occurrence_with_artificial_visits = construct_artificial_visits(
-            ehr_records,
-            self._dependency_dict[VISIT_OCCURRENCE],
-            spark=self.spark,
-            persistence_folder=self._output_data_folder,
-        )
-        # Refresh the dependency
-        self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
-
         if self._cache_events:
             all_patient_events_dir = os.path.join(self._output_data_folder, "all_patient_events")
             ehr_records.write.mode("overwrite").parquet(
@@ -639,6 +630,15 @@ class NestedCohortBuilder:
             ehr_records = self.spark.read.parquet(
                 all_patient_events_dir
             )
+
+        ehr_records, visit_occurrence_with_artificial_visits = construct_artificial_visits(
+            ehr_records,
+            self._dependency_dict[VISIT_OCCURRENCE],
+            spark=self.spark if self._cache_events else None,
+            persistence_folder=self._output_data_folder if self._cache_events else None,
+        )
+        # Refresh the dependency
+        self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
 
         # Duplicate the records for cohorts that allow multiple entries
         ehr_records = ehr_records.alias("ehr").join(

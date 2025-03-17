@@ -409,4 +409,9 @@ def create_spark_args(parse: bool = True):
         action="store_true",
         help="Indicate whether we want to cache all patient events including ATT in the local folder",
     )
+    parser.add_argument(
+        "--run_test",
+        dest="run_test",
+        action="store_true",
+    )
     return parser.parse_args() if parse else parser

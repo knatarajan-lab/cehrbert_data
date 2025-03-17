@@ -42,6 +42,7 @@ class HfReadmissionTest(PySparkAbstract):
             "condition_occurrence",
             "procedure_occurrence",
             "drug_exposure",
+            "--cache_events"
         ]
 
         main(create_spark_args())
