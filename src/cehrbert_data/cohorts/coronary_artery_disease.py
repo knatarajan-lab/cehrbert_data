@@ -22,11 +22,8 @@ FROM
     SELECT DISTINCT
         vo.person_id,
         vo.visit_occurrence_id,
-        from_utc_timestamp(
-            to_timestamp(
-                concat(date_format(co.condition_start_date, 'yyyy-MM-dd'), ' 23:59:00'), 'yyyy-MM-dd HH:mm:ss'
-            ),
-            'America/New_York'
+        to_timestamp(
+            concat(date_format(co.condition_start_date, 'yyyy-MM-dd'), ' 23:59:00'), 'yyyy-MM-dd HH:mm:ss'
         ) AS index_date,
         ROW_NUMBER() OVER(
             PARTITION BY co.person_id
