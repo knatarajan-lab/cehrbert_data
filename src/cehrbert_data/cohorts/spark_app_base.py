@@ -232,8 +232,8 @@ class BaseCohortBuilder(ABC):
         FROM global_temp.cohort AS c
         JOIN global_temp.observation_period AS p
             ON c.person_id = p.person_id
-                AND DATE_ADD(c.index_date, -{prior_observation_period}) >= p.observation_period_start_date
-                AND DATE_ADD(c.index_date, {post_observation_period}) <= p.observation_period_end_date
+                AND c.index_date - INTERVAL {prior_observation_period} DAY >= p.observation_period_start_date
+                AND c.index_date + INTERVAL {post_observation_period} DAY <= p.observation_period_end_date
         """.format(
                 prior_observation_period=self._prior_observation_period,
                 post_observation_period=self._post_observation_period,
@@ -434,7 +434,7 @@ class NestedCohortBuilder:
             FROM global_temp.target_cohort AS t
             LEFT JOIN global_temp.{entry_cohort} AS o
                 ON t.person_id = o.person_id
-                    AND DATE_ADD(t.index_date, {prediction_start_days}) > o.index_date
+                AND t.index_date + INTERVAL {prediction_start_days} DAY > o.index_date
             WHERE o.person_id IS NULL
             """.format(
                     entry_cohort=ENTRY_COHORT,
@@ -468,7 +468,7 @@ class NestedCohortBuilder:
             LEFT JOIN global_temp.outcome_cohort AS exclusion
                 ON t.person_id = exclusion.person_id
                     AND exclusion.index_date BETWEEN t.index_date
-                        AND DATE_ADD(t.index_date, {prediction_start_days})
+                        AND t.index_date + INTERVAL {prediction_start_days} DAY
             WHERE exclusion.person_id IS NULL
             """.format(
                     prediction_start_days=max(prediction_start_days - 1, 0)
@@ -485,7 +485,7 @@ class NestedCohortBuilder:
             FROM global_temp.target_cohort AS t
             LEFT JOIN global_temp.outcome_cohort AS o
                 ON t.person_id = o.person_id
-                    AND o.index_date >= DATE_ADD(t.index_date, {prediction_start_days})
+                    AND o.index_date >= t.index_date + INTERVAL {prediction_start_days} DAY
             """
         else:
             query_template = """
@@ -496,11 +496,11 @@ class NestedCohortBuilder:
             FROM global_temp.target_cohort AS t
             LEFT JOIN global_temp.observation_period AS op
                 ON t.person_id = op.person_id
-                    AND DATE_ADD(t.index_date, {prediction_window}) <= op.observation_period_end_date
+                    AND t.index_date + INTERVAL {prediction_window} DAY <= op.observation_period_end_date
             LEFT JOIN global_temp.outcome_cohort AS o
                 ON t.person_id = o.person_id
-                    AND o.index_date BETWEEN DATE_ADD(t.index_date, {prediction_start_days})
-                        AND DATE_ADD(t.index_date, {prediction_window})
+                    AND o.index_date BETWEEN t.index_date + INTERVAL {prediction_start_days} DAY
+                        AND t.index_date + INTERVAL {prediction_window} DAY
             WHERE op.person_id IS NOT NULL OR o.person_id IS NOT NULL
             """
 

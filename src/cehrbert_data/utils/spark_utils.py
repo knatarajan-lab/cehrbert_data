@@ -942,7 +942,7 @@ def construct_artificial_visits(
         )
         events_to_fix = spark.read.parquet(raw_events_dir)
 
-    events_to_fix = events_to_fix.drop("visit_occurrence_id").alias("event").join(
+    events_to_fix_with_visit = events_to_fix.drop("visit_occurrence_id").alias("event").join(
         visit.alias("visit"),
         (F.col("event.person_id") == F.col("visit.person_id"))
         & F.col("event.datetime").between(F.col("visit.visit_start_datetime"), F.col("visit.visit_end_datetime")),
@@ -959,7 +959,7 @@ def construct_artificial_visits(
          F.col("visit.visit_concept_id").alias("visit_concept_id")]
     )
 
-    linked_events = events_to_fix.where(F.col("visit_occurrence_id").isNotNull())
+    linked_events = events_to_fix_with_visit.where(F.col("visit_occurrence_id").isNotNull())
     if spark is not None and persistence_folder is not None:
         linked_events_dir = os.path.join(persistence_folder, "events_to_fix", "linked_events")
         linked_events.write.mode("overwrite").parquet(
@@ -967,7 +967,7 @@ def construct_artificial_visits(
         )
         linked_events = spark.read.parquet(linked_events_dir)
 
-    events_artificial_visits = events_to_fix.where(F.col("visit_occurrence_id").isNull())
+    events_artificial_visits = events_to_fix_with_visit.where(F.col("visit_occurrence_id").isNull())
     max_visit_id_value = visit.select(F.max("visit_occurrence_id")).collect()[0][0]
     # Generate the new visit_occurrence_id for (person_id, data) pairs
     new_visit_ids = events_artificial_visits.select(
@@ -985,7 +985,7 @@ def construct_artificial_visits(
         )
         events_artificial_visits = spark.read.parquet(events_artificial_visits_dir)
 
-    artificial_visits = events_artificial_visits.groupby(
+    artificial_visits_agg = events_artificial_visits.groupby(
         "visit_occurrence_id",
         "person_id"
     ).agg(
@@ -1000,13 +1000,13 @@ def construct_artificial_visits(
         F.to_date("visit_end_datetime").alias("visit_end_date"),
         F.col("visit_end_datetime")
     )
-    existing_columns = artificial_visits.columns
+    existing_columns = artificial_visits_agg.columns
     additional_columns = [
         F.lit(None).cast(field.dataType).alias(field.name)
         for field in visit_occurrence.schema
         if field.name not in existing_columns
     ]
-    artificial_visits = artificial_visits.select(existing_columns + additional_columns)
+    artificial_visits = artificial_visits_agg.select(existing_columns + additional_columns)
     if spark is not None and persistence_folder is not None:
         artificial_visits_dir = os.path.join(persistence_folder, "events_to_fix", "artificial_visits")
         artificial_visits.write.mode("overwrite").parquet(
