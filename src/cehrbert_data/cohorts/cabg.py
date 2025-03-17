@@ -11,7 +11,12 @@ FROM
     SELECT DISTINCT
         vo.person_id,
         vo.visit_occurrence_id,
-        to_timestamp(concat(date_format(po.procedure_date, 'yyyy-MM-dd'), ' 23:59:00'), 'yyyy-MM-dd HH:mm:ss') AS index_date,
+        from_utc_timestamp(
+            to_timestamp(
+                concat(date_format(po.procedure_date, 'yyyy-MM-dd'), ' 23:59:00'), 'yyyy-MM-dd HH:mm:ss'
+            ),
+            'America/New_York'
+        ) AS index_date,
         ROW_NUMBER() OVER(
             PARTITION BY po.person_id
             ORDER BY po.procedure_datetime,
