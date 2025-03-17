@@ -21,6 +21,7 @@ from cehrbert_data.utils.spark_utils import (
     extract_ehr_records,
     get_descendant_concept_ids,
     preprocess_domain_table,
+    construct_artificial_visits
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -620,6 +621,15 @@ class NestedCohortBuilder:
             refresh_measurement=self._refresh_measurement,
             aggregate_by_hour=self._aggregate_by_hour,
         )
+
+        ehr_records, visit_occurrence_with_artificial_visits = construct_artificial_visits(
+            ehr_records,
+            self._dependency_dict[VISIT_OCCURRENCE],
+            spark=self.spark,
+            persistence_folder=self._output_data_folder,
+        )
+        # Refresh the dependency
+        self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
 
         if self._cache_events:
             all_patient_events_dir = os.path.join(self._output_data_folder, "all_patient_events")
