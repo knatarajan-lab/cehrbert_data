@@ -118,7 +118,7 @@ def main(args):
         "person_id"
     ).withColumn(
         "index_date",
-        f.expr("index_date + INTERVAL 0.1 SECOND")
+        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     ).where(ehr_records["datetime"] <= cohort["index_date"])
 
     if args.cache_events:
@@ -157,7 +157,8 @@ def main(args):
             f.col("visit_start_datetime")
         ).cast(t.TimestampType())
     ).where(
-        f.col("visit_start_datetime") <= f.col("index_date")
+        f.col("visit_start_datetime") <=
+        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     )
 
 
