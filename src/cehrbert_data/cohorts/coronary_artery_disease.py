@@ -22,12 +22,12 @@ FROM
     SELECT DISTINCT
         vo.person_id,
         vo.visit_occurrence_id,
-        coalesce(co.condition_start_datetime, co.condition_start_date) as index_date,
+        to_timestamp(concat(date_format(co.condition_start_date, 'yyyy-MM-dd'), ' 23:59:00')) AS index_date,
         ROW_NUMBER() OVER(
-            PARTITION BY vo.person_id
-            ORDER BY vo.visit_start_date,
-                vo.visit_start_datetime,
-                vo.visit_occurrence_id
+            PARTITION BY co.person_id
+            ORDER BY co.condition_start_datetime,
+                co.condition_start_date,
+                co.visit_occurrence_id
         ) as r_number
     FROM global_temp.condition_occurrence AS co
     JOIN global_temp.visit_occurrence AS vo
