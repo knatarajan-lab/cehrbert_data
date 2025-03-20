@@ -51,6 +51,7 @@ def main(
         continue_from_events: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = True,
+        should_construct_artificial_visits: bool = False,
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -75,6 +76,7 @@ def main(
         f"with_drug_rollup: {with_drug_rollup}\n"
         f"refresh_measurement: {refresh_measurement}\n"
         f"aggregate_by_hour: {aggregate_by_hour}\n"
+        f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
     )
 
     domain_tables = []
@@ -161,13 +163,14 @@ def main(
 
     patient_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
 
-    # Construct artificial visits or re-link the visits for the problem list events
-    patient_events, visit_occurrence_person = construct_artificial_visits(
-        patient_events,
-        visit_occurrence_person,
-        spark=spark,
-        persistence_folder=output_folder,
-    )
+    if should_construct_artificial_visits:
+        # Construct artificial visits or re-link the visits for the problem list events
+        patient_events, visit_occurrence_person = construct_artificial_visits(
+            patient_events,
+            visit_occurrence_person,
+            spark=spark,
+            persistence_folder=output_folder,
+        )
 
     if is_new_patient_representation:
         sequence_data = create_sequence_data_with_att(
@@ -354,10 +357,11 @@ if __name__ == "__main__":
         choices=[e.value for e in AttType],
     )
     parser.add_argument(
-        "--inpatient_att_type",
-        dest="inpatient_att_type",
-        action="store",
-        choices=[e.value for e in AttType],
+        "--should_construct_artificial_visits",
+        dest="should_construct_artificial_visits",
+        action="store_true",
+        help="Indicate whether we should construct artificial visits for "
+             "the problem list records that could occur years ahead",
     )
 
     ARGS = parser.parse_args()
@@ -388,4 +392,5 @@ if __name__ == "__main__":
         continue_from_events=ARGS.continue_from_events,
         refresh_measurement=ARGS.refresh_measurement,
         aggregate_by_hour=ARGS.aggregate_by_hour,
+        should_construct_artificial_visits=ARGS.should_construct_artificial_visits,
     )

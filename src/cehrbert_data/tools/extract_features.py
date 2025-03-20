@@ -130,12 +130,13 @@ def main(args):
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
 
-    ehr_records, visit_occurrence = construct_artificial_visits(
-        ehr_records,
-        visit_occurrence=visit_occurrence,
-        spark=spark,
-        persistence_folder = str(os.path.join(args.output_folder, args.cohort_name))
-    )
+    if args.should_construct_artificial_visits:
+        ehr_records, visit_occurrence = construct_artificial_visits(
+            ehr_records,
+            visit_occurrence=visit_occurrence,
+            spark=spark,
+            persistence_folder = str(os.path.join(args.output_folder, args.cohort_name))
+        )
 
     cohort_visit_occurrence = visit_occurrence.join(
         cohort.select("person_id", "cohort_member_id", "index_date"),

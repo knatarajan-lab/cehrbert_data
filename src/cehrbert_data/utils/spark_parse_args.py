@@ -410,8 +410,10 @@ def create_spark_args(parse: bool = True):
         help="Indicate whether we want to cache all patient events including ATT in the local folder",
     )
     parser.add_argument(
-        "--run_test",
-        dest="run_test",
+        "--should_construct_artificial_visits",
+        dest="should_construct_artificial_visits",
         action="store_true",
+        help="Indicate whether we should construct artificial visits for "
+             "the problem list records that could occur years ahead",
     )
     return parser.parse_args() if parse else parser
