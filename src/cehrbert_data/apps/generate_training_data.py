@@ -287,7 +287,7 @@ if __name__ == "__main__":
         type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
         action="store",
         required=False,
-        default="2018-01-01",
+        default="1985-01-01",
     )
     parser.add_argument(
         "-iv",
