@@ -357,6 +357,12 @@ if __name__ == "__main__":
         choices=[e.value for e in AttType],
     )
     parser.add_argument(
+        "--inpatient_att_type",
+        dest="inpatient_att_type",
+        action="store",
+        choices=[e.value for e in AttType],
+    )
+    parser.add_argument(
         "--should_construct_artificial_visits",
         dest="should_construct_artificial_visits",
         action="store_true",
