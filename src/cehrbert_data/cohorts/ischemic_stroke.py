@@ -2,17 +2,33 @@ from cehrbert_data.cohorts.query_builder import AncestorTableSpec, QueryBuilder,
 from cehrbert_data.const.common import CONDITION_OCCURRENCE, PERSON, VISIT_OCCURRENCE
 
 COHORT_QUERY_TEMPLATE = """
-SELECT
-    co.person_id,
-    FIRST(DATE(vo.visit_start_date)) OVER (PARTITION BY co.person_id
-        ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS index_date,
-    FIRST(vo.visit_occurrence_id) OVER (PARTITION BY co.person_id
-        ORDER BY DATE(vo.visit_start_date), vo.visit_occurrence_id) AS visit_occurrence_id
-FROM global_temp.condition_occurrence AS co
-JOIN global_temp.visit_occurrence AS vo
-    ON co.visit_occurrence_id = vo.visit_occurrence_id
-JOIN global_temp.{ischemic_stroke_concepts} AS c
-    ON co.condition_concept_id = c.concept_id
+SELECT DISTINCT
+    c.person_id,
+    c.index_date,
+    c.visit_occurrence_id
+FROM
+(
+    SELECT
+        co.person_id,
+        vo.visit_occurrence_id,
+        CASE
+            WHEN co.condition_start_datetime < vo.visit_start_datetime AND datediff(vo.visit_start_datetime, co.condition_start_datetime) <= 1 
+                THEN to_timestamp(concat(date_format(vo.visit_start_date, 'yyyy-MM-dd'), ' 23:59:00'), 'yyyy-MM-dd HH:mm:ss')
+            ELSE to_timestamp(concat(date_format(co.condition_start_date, 'yyyy-MM-dd'), ' 23:59:00'), 'yyyy-MM-dd HH:mm:ss')
+        END AS index_date,
+        ROW_NUMBER() OVER(
+            PARTITION BY co.person_id
+            ORDER BY co.condition_start_datetime,
+                co.condition_start_date,
+                co.visit_occurrence_id
+        ) as r_number
+    FROM global_temp.condition_occurrence AS co
+    JOIN global_temp.visit_occurrence AS vo
+        ON co.visit_occurrence_id = vo.visit_occurrence_id
+    JOIN global_temp.{ischemic_stroke_concepts} AS c
+        ON co.condition_concept_id = c.concept_id
+) AS c
+WHERE c.r_number = 1
 """
 
 ISCHEMIC_STROKE_CONCEPT_ID = [443454]

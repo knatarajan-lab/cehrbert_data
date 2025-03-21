@@ -22,6 +22,7 @@ from cehrbert_data.utils.spark_utils import (
     preprocess_domain_table,
     get_measurement_table,
     validate_table_names,
+    construct_artificial_visits
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -50,6 +51,7 @@ def main(
         continue_from_events: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = True,
+        should_construct_artificial_visits: bool = False,
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -74,6 +76,7 @@ def main(
         f"with_drug_rollup: {with_drug_rollup}\n"
         f"refresh_measurement: {refresh_measurement}\n"
         f"aggregate_by_hour: {aggregate_by_hour}\n"
+        f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
     )
 
     domain_tables = []
@@ -94,6 +97,7 @@ def main(
         "visit_start_date",
         "visit_start_datetime",
         "visit_end_date",
+        "visit_end_datetime",
         "visit_concept_id",
         "person_id",
         "discharged_to_concept_id",
@@ -158,6 +162,15 @@ def main(
         patient_events.write.mode("overwrite").parquet(os.path.join(output_folder, "all_patient_events"))
 
     patient_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
+
+    if should_construct_artificial_visits:
+        # Construct artificial visits or re-link the visits for the problem list events
+        patient_events, visit_occurrence_person = construct_artificial_visits(
+            patient_events,
+            visit_occurrence_person,
+            spark=spark,
+            persistence_folder=output_folder,
+        )
 
     if is_new_patient_representation:
         sequence_data = create_sequence_data_with_att(
@@ -274,7 +287,7 @@ if __name__ == "__main__":
         type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
         action="store",
         required=False,
-        default="2018-01-01",
+        default="1985-01-01",
     )
     parser.add_argument(
         "-iv",
@@ -349,6 +362,13 @@ if __name__ == "__main__":
         action="store",
         choices=[e.value for e in AttType],
     )
+    parser.add_argument(
+        "--should_construct_artificial_visits",
+        dest="should_construct_artificial_visits",
+        action="store_true",
+        help="Indicate whether we should construct artificial visits for "
+             "the problem list records that could occur years ahead",
+    )
 
     ARGS = parser.parse_args()
 
@@ -378,4 +398,5 @@ if __name__ == "__main__":
         continue_from_events=ARGS.continue_from_events,
         refresh_measurement=ARGS.refresh_measurement,
         aggregate_by_hour=ARGS.aggregate_by_hour,
+        should_construct_artificial_visits=ARGS.should_construct_artificial_visits,
     )

@@ -22,7 +22,7 @@ FROM
             WHEN v.discharged_to_concept_id == 4216643 THEN 1
             ELSE 0
         END AS expired,
-        ROW_NUMBER() OVER(PARTITION BY v.person_id ORDER BY DATE(v.visit_end_date) DESC) AS rn
+        ROW_NUMBER() OVER(PARTITION BY v.person_id ORDER BY COALESCE(v.visit_end_datetime, v.visit_end_date) DESC) AS rn
     FROM global_temp.visit_occurrence AS v
     WHERE v.visit_concept_id IN (9201, 262) --inpatient, er-inpatient
         AND v.visit_end_datetime IS NOT NULL

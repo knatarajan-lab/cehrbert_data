@@ -69,6 +69,22 @@ DOMAIN_KEY_FIELDS = {
             "measurement"
         )
     ],
+    "observation_id": [
+        (
+            "observation_concept_id",
+            "observation_date",
+            "observation_datetime",
+            "observation"
+        )
+    ],
+    "device_exposure_id": [
+        (
+            "device_concept_id",
+            "device_exposure_start_date",
+            "device_exposure_start_datetime",
+            "device"
+        )
+    ],
     "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
         ("visit_concept_id", "visit_start_date", "visit"),
@@ -859,6 +875,156 @@ def create_concept_frequency_data(patient_event, date_filter=None):
     )
 
     return patient_event
+
+
+def construct_artificial_visits(
+        patient_events: DataFrame,
+        visit_occurrence: DataFrame,
+        spark: SparkSession = None,
+        persistence_folder: str = None,
+) -> Tuple[DataFrame, DataFrame]:
+    """
+    Fix visit_occurrence_id of
+
+    :param patient_events:
+    :param visit_occurrence:
+    :param spark:
+    :param persistence_folder:
+    :return:
+    """
+    visit = visit_occurrence.select(
+        F.col("person_id"),
+        F.col("visit_occurrence_id"),
+        F.col("visit_concept_id"),
+        F.coalesce("visit_start_datetime", F.to_timestamp("visit_start_date")).alias("visit_start_datetime"),
+        F.coalesce("visit_end_datetime", F.to_timestamp(F.date_add(F.col("visit_end_date"), 1))).alias("visit_end_datetime"),
+    ).withColumn(
+        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 1 DAYS")
+    ).withColumn(
+        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 1 DAYS")
+    )
+
+    # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
+    patient_events = patient_events.join(
+        visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
+        "visit_occurrence_id"
+    ).withColumn(
+        "visit_occurrence_id",
+        F.when(
+            F.col("datetime").between(F.col("visit_start_lower_bound"), F.col("visit_end_upper_bound")),
+            F.col("visit_occurrence_id")
+        ).otherwise(
+            F.lit(None).cast(T.IntegerType())
+        )
+    ).withColumn(
+        "visit_concept_id",
+        F.when(
+            F.col("visit_occurrence_id").isNotNull(),
+            F.col("visit_concept_id")
+        ).otherwise(
+            F.lit(0).cast(T.IntegerType())
+        )
+    ).drop(
+        "visit_start_lower_bound", "visit_end_upper_bound"
+    )
+
+    # Try to connect to the existing visit
+    events_to_fix = patient_events.where(
+        F.col("visit_occurrence_id").isNull()
+    ).withColumn(
+        "record_id", F.monotonically_increasing_id()
+    )
+
+    if spark is not None and persistence_folder is not None:
+        raw_events_dir = os.path.join(persistence_folder, "events_to_fix", "raw_events")
+        events_to_fix.write.mode("overwrite").parquet(
+            raw_events_dir
+        )
+        events_to_fix = spark.read.parquet(raw_events_dir)
+
+    events_to_fix_with_visit = events_to_fix.drop("visit_occurrence_id").alias("event").join(
+        visit.alias("visit"),
+        (F.col("event.person_id") == F.col("visit.person_id"))
+        & F.col("event.datetime").between(F.col("visit.visit_start_datetime"), F.col("visit.visit_end_datetime")),
+        "left_outer"
+    ).withColumn(
+        "matching_rank",
+        F.row_number().over(W.partitionBy("event.record_id").orderBy("visit.visit_start_datetime"))
+    ).where(
+        F.col("matching_rank") == 1
+    ).select(
+        [F.col("event." + _).alias(_) for _ in events_to_fix.schema.fieldNames()
+         if _ not in ["visit_occurrence_id", "visit_concept_id"]] +
+        [F.col("visit.visit_occurrence_id").alias("visit_occurrence_id"),
+         F.col("visit.visit_concept_id").alias("visit_concept_id")]
+    )
+
+    linked_events = events_to_fix_with_visit.where(F.col("visit_occurrence_id").isNotNull())
+    if spark is not None and persistence_folder is not None:
+        linked_events_dir = os.path.join(persistence_folder, "events_to_fix", "linked_events")
+        linked_events.write.mode("overwrite").parquet(
+            linked_events_dir
+        )
+        linked_events = spark.read.parquet(linked_events_dir)
+
+    events_artificial_visits = events_to_fix_with_visit.where(F.col("visit_occurrence_id").isNull())
+    max_visit_id_value = visit.select(F.max("visit_occurrence_id")).collect()[0][0]
+    # Generate the new visit_occurrence_id for (person_id, data) pairs
+    new_visit_ids = events_artificial_visits.select(
+        "person_id", "date"
+    ).distinct().withColumn(
+        "visit_occurrence_id", F.lit(max_visit_id_value) + F.rank().over(W.orderBy("person_id", "date"))
+    )
+    events_artificial_visits = events_artificial_visits.drop("visit_occurrence_id").join(
+        new_visit_ids, ["person_id", "date"]
+    )
+    if spark is not None and persistence_folder is not None:
+        events_artificial_visits_dir = os.path.join(persistence_folder, "events_to_fix", "events_artificial_visits")
+        events_artificial_visits.write.mode("overwrite").parquet(
+            events_artificial_visits_dir
+        )
+        events_artificial_visits = spark.read.parquet(events_artificial_visits_dir)
+
+    artificial_visits_agg = events_artificial_visits.groupby(
+        "visit_occurrence_id",
+        "person_id"
+    ).agg(
+        F.min("datetime").alias("visit_start_datetime"),
+        F.max("datetime").alias("visit_end_datetime")
+    ).select(
+        F.col("visit_occurrence_id"),
+        F.col("person_id"),
+        F.lit(0).alias("visit_concept_id"),
+        F.to_date("visit_start_datetime").alias("visit_start_date"),
+        F.col("visit_start_datetime"),
+        F.to_date("visit_end_datetime").alias("visit_end_date"),
+        F.col("visit_end_datetime")
+    )
+    existing_columns = artificial_visits_agg.columns
+    additional_columns = [
+        F.lit(None).cast(field.dataType).alias(field.name)
+        for field in visit_occurrence.schema
+        if field.name not in existing_columns
+    ]
+    artificial_visits = artificial_visits_agg.select(existing_columns + additional_columns)
+    if spark is not None and persistence_folder is not None:
+        artificial_visits_dir = os.path.join(persistence_folder, "events_to_fix", "artificial_visits")
+        artificial_visits.write.mode("overwrite").parquet(
+            artificial_visits_dir
+        )
+        artificial_visits = spark.read.parquet(artificial_visits_dir)
+
+    refreshed_patient_events = patient_events.where(
+        F.col("visit_occurrence_id").isNotNull()
+    ).unionByName(
+        linked_events.drop("record_id")
+    ).unionByName(
+        events_artificial_visits.drop("record_id")
+    )
+
+    visit_occurrence = visit_occurrence.unionByName(artificial_visits)
+
+    return refreshed_patient_events, visit_occurrence
 
 
 def extract_ehr_records(

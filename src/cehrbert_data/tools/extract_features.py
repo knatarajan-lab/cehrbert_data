@@ -12,7 +12,10 @@ from pyspark.sql.window import Window
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_parse_args import create_spark_args
 from cehrbert_data.utils.spark_utils import (
-    extract_ehr_records, create_sequence_data_with_att, create_concept_frequency_data
+    extract_ehr_records,
+    construct_artificial_visits,
+    create_sequence_data_with_att,
+    create_concept_frequency_data,
 )
 
 
@@ -109,11 +112,13 @@ def main(args):
         refresh_measurement=args.refresh_measurement,
         aggregate_by_hour=args.aggregate_by_hour,
     )
-
     # Drop index_date because create_sequence_data_with_att does not expect this column
     ehr_records = cohort.select("person_id", "cohort_member_id", "index_date").join(
         ehr_records,
         "person_id"
+    ).withColumn(
+        "index_date",
+        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     ).where(ehr_records["datetime"] <= cohort["index_date"])
 
     if args.cache_events:
@@ -124,6 +129,15 @@ def main(args):
         ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+
+    if args.should_construct_artificial_visits:
+        ehr_records, visit_occurrence = construct_artificial_visits(
+            ehr_records,
+            visit_occurrence=visit_occurrence,
+            spark=spark,
+            persistence_folder = str(os.path.join(args.output_folder, args.cohort_name))
+        )
+
     cohort_visit_occurrence = visit_occurrence.join(
         cohort.select("person_id", "cohort_member_id", "index_date"),
         "person_id"
@@ -144,7 +158,8 @@ def main(args):
             f.col("visit_start_datetime")
         ).cast(t.TimestampType())
     ).where(
-        f.col("visit_start_datetime") <= f.col("index_date")
+        f.col("visit_start_datetime") <=
+        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     )
 
 

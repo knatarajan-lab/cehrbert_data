@@ -5,7 +5,6 @@ import shutil
 from abc import ABC
 from typing import List
 
-from numpy.random import permutation
 from pandas import to_datetime
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -22,6 +21,7 @@ from cehrbert_data.utils.spark_utils import (
     extract_ehr_records,
     get_descendant_concept_ids,
     preprocess_domain_table,
+    construct_artificial_visits
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -232,8 +232,8 @@ class BaseCohortBuilder(ABC):
         FROM global_temp.cohort AS c
         JOIN global_temp.observation_period AS p
             ON c.person_id = p.person_id
-                AND DATE_ADD(c.index_date, -{prior_observation_period}) >= p.observation_period_start_date
-                AND DATE_ADD(c.index_date, {post_observation_period}) <= p.observation_period_end_date
+                AND c.index_date - INTERVAL {prior_observation_period} DAY >= p.observation_period_start_date
+                AND c.index_date + INTERVAL {post_observation_period} DAY <= p.observation_period_end_date
         """.format(
                 prior_observation_period=self._prior_observation_period,
                 post_observation_period=self._post_observation_period,
@@ -317,6 +317,7 @@ class NestedCohortBuilder:
             exclude_features: bool = True,
             meds_format: bool = False,
             cache_events: bool = False,
+            should_construct_artificial_visits: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -363,6 +364,7 @@ class NestedCohortBuilder:
         self._exclude_features = exclude_features
         self._meds_format = meds_format
         self._cache_events = cache_events
+        self._should_construct_artificial_visits = should_construct_artificial_visits
 
         self.get_logger().info(
             f"cohort_name: {cohort_name}\n"
@@ -403,6 +405,7 @@ class NestedCohortBuilder:
             f"extract_features: {exclude_features}\n"
             f"meds_format: {meds_format}\n"
             f"cache_events: {cache_events}\n"
+            f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
         )
 
         self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
@@ -434,7 +437,7 @@ class NestedCohortBuilder:
             FROM global_temp.target_cohort AS t
             LEFT JOIN global_temp.{entry_cohort} AS o
                 ON t.person_id = o.person_id
-                    AND DATE_ADD(t.index_date, {prediction_start_days}) > o.index_date
+                AND t.index_date + INTERVAL {prediction_start_days} DAY > o.index_date
             WHERE o.person_id IS NULL
             """.format(
                     entry_cohort=ENTRY_COHORT,
@@ -468,7 +471,7 @@ class NestedCohortBuilder:
             LEFT JOIN global_temp.outcome_cohort AS exclusion
                 ON t.person_id = exclusion.person_id
                     AND exclusion.index_date BETWEEN t.index_date
-                        AND DATE_ADD(t.index_date, {prediction_start_days})
+                        AND t.index_date + INTERVAL {prediction_start_days} DAY
             WHERE exclusion.person_id IS NULL
             """.format(
                     prediction_start_days=max(prediction_start_days - 1, 0)
@@ -485,7 +488,7 @@ class NestedCohortBuilder:
             FROM global_temp.target_cohort AS t
             LEFT JOIN global_temp.outcome_cohort AS o
                 ON t.person_id = o.person_id
-                    AND o.index_date >= DATE_ADD(t.index_date, {prediction_start_days})
+                    AND o.index_date >= t.index_date + INTERVAL {prediction_start_days} DAY
             """
         else:
             query_template = """
@@ -496,11 +499,11 @@ class NestedCohortBuilder:
             FROM global_temp.target_cohort AS t
             LEFT JOIN global_temp.observation_period AS op
                 ON t.person_id = op.person_id
-                    AND DATE_ADD(t.index_date, {prediction_window}) <= op.observation_period_end_date
+                    AND t.index_date + INTERVAL {prediction_window} DAY <= op.observation_period_end_date
             LEFT JOIN global_temp.outcome_cohort AS o
                 ON t.person_id = o.person_id
-                    AND o.index_date BETWEEN DATE_ADD(t.index_date, {prediction_start_days})
-                        AND DATE_ADD(t.index_date, {prediction_window})
+                    AND o.index_date BETWEEN t.index_date + INTERVAL {prediction_start_days} DAY
+                        AND t.index_date + INTERVAL {prediction_window} DAY
             WHERE op.person_id IS NOT NULL OR o.person_id IS NOT NULL
             """
 
@@ -559,19 +562,22 @@ class NestedCohortBuilder:
             cohort = cohort.join(
                 observation_period.select("person_id", "observation_period_end_date"),
                 cohort[person_id_column] == observation_period["person_id"]
+            ).select(
+                [cohort[c] for c in cohort.columns] +
+                [observation_period["observation_period_end_date"]]
             ).withColumn(
                 "study_end_date",
                 F.coalesce(F.col("outcome_date"), F.col("observation_period_end_date"))
-            ).drop("observation_period_end_date")
+            ).drop(
+                "observation_period_end_date"
+            )
         else:
             # Add time_to_event
             cohort = cohort.withColumn(
                 "study_end_date",
                 F.coalesce(
                     F.col("outcome_date"),
-                    F.date_add(
-                        cohort[index_date_column], self._prediction_window
-                    )
+                    F.expr(f"{index_date_column} + INTERVAL {self._prediction_window} DAYS")
                 )
             )
         cohort = cohort.withColumn("time_to_event", F.datediff("study_end_date", index_date_column))
@@ -579,11 +585,11 @@ class NestedCohortBuilder:
         # if patient_splits is provided, we will
         if self._patient_splits_folder:
             patient_splits = self.spark.read.parquet(self._patient_splits_folder)
-            cohort.join(
-                patient_splits,
-                cohort[person_id_column] == patient_splits.person_id
+            cohort.alias("cohort").join(
+                patient_splits.alias("split"),
+                F.col(f"cohort.{person_id_column}") == F.col("split.person_id")
             ).select(
-                [cohort[c] for c in cohort.columns] + [patient_splits.split]
+                [F.col(f"cohort.{c}").alias(c) for c in cohort.columns] + [F.col("split.split").alias("split")]
             ).orderBy(person_id_column, index_date_column).write.mode(
                 "overwrite"
             ).parquet(
@@ -597,7 +603,9 @@ class NestedCohortBuilder:
             cohort.where('split="test"').write.mode("overwrite").parquet(os.path.join(self._output_data_folder, "test"))
             shutil.rmtree(os.path.join(self._output_data_folder, "temp"))
         else:
-            cohort.orderBy(person_id_column, index_date_column).write.mode("overwrite").parquet(self._output_data_folder)
+            cohort.orderBy(person_id_column, index_date_column).write.mode("overwrite").parquet(
+                os.path.join(self._output_data_folder, "data")
+            )
 
     def extract_ehr_records_for_cohort(self, cohort: DataFrame):
         """
@@ -619,6 +627,25 @@ class NestedCohortBuilder:
             aggregate_by_hour=self._aggregate_by_hour,
         )
 
+        if self._cache_events:
+            all_patient_events_dir = os.path.join(self._output_data_folder, "all_patient_events")
+            ehr_records.write.mode("overwrite").parquet(
+                all_patient_events_dir
+            )
+            ehr_records = self.spark.read.parquet(
+                all_patient_events_dir
+            )
+
+        if self._should_construct_artificial_visits:
+            ehr_records, visit_occurrence_with_artificial_visits = construct_artificial_visits(
+                ehr_records,
+                self._dependency_dict[VISIT_OCCURRENCE],
+                spark=self.spark if self._cache_events else None,
+                persistence_folder=self._output_data_folder if self._cache_events else None,
+            )
+            # Refresh the dependency
+            self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
+
         # Duplicate the records for cohorts that allow multiple entries
         ehr_records = ehr_records.alias("ehr").join(
             cohort.alias("cohort"), F.col("ehr.person_id") == F.col("cohort.person_id")
@@ -629,30 +656,29 @@ class NestedCohortBuilder:
         # Only allow the data records that occurred between the index date and the prediction window
         if self._is_population_estimation:
             if self._is_prediction_window_unbounded:
-                record_window_filter = F.col("ehr.date") <= F.current_date()
+                record_window_filter = F.col("ehr.datetime") <= F.current_timestamp()
             else:
-                record_window_filter = F.col("ehr.date") <= F.date_add(
-                    F.col("cohort.index_date"), self._prediction_window
+                record_window_filter = (
+                        F.col("ehr.datetime") <=
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                 )
         else:
             # For patient level prediction, we remove all records post index date
             if self._is_observation_post_index:
-                record_window_filter = F.col("ehr.date").between(
+                record_window_filter = F.col("ehr.datetime").between(
                     F.col("cohort.index_date"),
-                    F.date_add(F.col("cohort.index_date"), self._observation_window),
+                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS + INTERVAL 0.1 SECOND")
                 )
             else:
                 if self._is_observation_window_unbounded:
-                    record_window_filter = F.col("ehr.date") <= F.date_sub(
-                        F.col("cohort.index_date"), self._hold_off_window
+                    record_window_filter = (
+                        F.col("ehr.datetime")
+                        <= F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                     )
                 else:
-                    record_window_filter = F.col("ehr.date").between(
-                        F.date_sub(
-                            F.col("cohort.index_date"),
-                            self._observation_window + self._hold_off_window,
-                        ),
-                        F.date_sub(F.col("cohort.index_date"), self._hold_off_window),
+                    record_window_filter = F.col("ehr.datetime").between(
+                        F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND"),
                     )
 
         # Somehow the dataframe join does not work without using the alias
@@ -710,6 +736,7 @@ class NestedCohortBuilder:
                 include_inpatient_hour_token=self._include_inpatient_hour_token,
                 spark=self.spark if self._cache_events else None,
                 persistence_folder=self._output_data_folder if self._cache_events else None,
+                cohort_index=cohort.select("person_id", "cohort_member_id", "index_date")
             )
 
         return create_sequence_data(
@@ -833,4 +860,6 @@ def create_prediction_cohort(
         single_contribution=spark_args.single_contribution,
         exclude_features=spark_args.exclude_features,
         meds_format=spark_args.meds_format,
+        cache_events=spark_args.cache_events,
+        should_construct_artificial_visits=spark_args.should_construct_artificial_visits,
     ).build()
