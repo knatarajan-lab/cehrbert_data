@@ -318,6 +318,7 @@ class NestedCohortBuilder:
             meds_format: bool = False,
             cache_events: bool = False,
             should_construct_artificial_visits: bool = False,
+            duplicate_records: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -365,6 +366,7 @@ class NestedCohortBuilder:
         self._meds_format = meds_format
         self._cache_events = cache_events
         self._should_construct_artificial_visits = should_construct_artificial_visits
+        self._duplicate_records = duplicate_records
 
         self.get_logger().info(
             f"cohort_name: {cohort_name}\n"
@@ -406,6 +408,7 @@ class NestedCohortBuilder:
             f"meds_format: {meds_format}\n"
             f"cache_events: {cache_events}\n"
             f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
+            f"duplicate_records: {duplicate_records}\n"
         )
 
         self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
@@ -642,6 +645,7 @@ class NestedCohortBuilder:
                 self._dependency_dict[VISIT_OCCURRENCE],
                 spark=self.spark if self._cache_events else None,
                 persistence_folder=self._output_data_folder if self._cache_events else None,
+                duplicate_records=self._duplicate_records
             )
             # Refresh the dependency
             self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
@@ -862,4 +866,5 @@ def create_prediction_cohort(
         meds_format=spark_args.meds_format,
         cache_events=spark_args.cache_events,
         should_construct_artificial_visits=spark_args.should_construct_artificial_visits,
+        duplicate_records=spark_args.duplicate_records,
     ).build()

@@ -416,4 +416,10 @@ def create_spark_args(parse: bool = True):
         help="Indicate whether we should construct artificial visits for "
              "the problem list records that could occur years ahead",
     )
+    parser.add_argument(
+        "--duplicate_records",
+        dest="duplicate_records",
+        action="store_true",
+        help="Indicate whether we want to duplicate the problem list records when constructing artificial visits"
+    )
     return parser.parse_args() if parse else parser

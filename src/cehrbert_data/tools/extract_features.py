@@ -135,7 +135,8 @@ def main(args):
             ehr_records,
             visit_occurrence=visit_occurrence,
             spark=spark,
-            persistence_folder = str(os.path.join(args.output_folder, args.cohort_name))
+            persistence_folder = str(os.path.join(args.output_folder, args.cohort_name)),
+            duplicate_records=args.duplicate_records
         )
 
     cohort_visit_occurrence = visit_occurrence.join(

@@ -882,7 +882,7 @@ def construct_artificial_visits(
         visit_occurrence: DataFrame,
         spark: SparkSession = None,
         persistence_folder: str = None,
-        append: bool = True
+        duplicate_records: bool = False
 ) -> Tuple[DataFrame, DataFrame]:
     """
     Fix visit_occurrence_id of
@@ -891,7 +891,7 @@ def construct_artificial_visits(
     :param visit_occurrence:
     :param spark:
     :param persistence_folder:
-    :param append:
+    :param duplicate_records:
     :return:
     """
     visit = visit_occurrence.select(
@@ -930,7 +930,7 @@ def construct_artificial_visits(
         "visit_start_lower_bound", "visit_end_upper_bound"
     )
 
-    if append:
+    if duplicate_records:
         patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
     else:
         patient_events = updated_patient_events

@@ -52,6 +52,7 @@ def main(
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = True,
         should_construct_artificial_visits: bool = False,
+        duplicate_records: bool = False
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -77,6 +78,7 @@ def main(
         f"refresh_measurement: {refresh_measurement}\n"
         f"aggregate_by_hour: {aggregate_by_hour}\n"
         f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
+        f"duplicate_records: {duplicate_records}\n"
     )
 
     domain_tables = []
@@ -170,6 +172,7 @@ def main(
             visit_occurrence_person,
             spark=spark,
             persistence_folder=output_folder,
+            duplicate_records=duplicate_records
         )
 
     if is_new_patient_representation:
@@ -369,7 +372,12 @@ if __name__ == "__main__":
         help="Indicate whether we should construct artificial visits for "
              "the problem list records that could occur years ahead",
     )
-
+    parser.add_argument(
+        "--duplicate_records",
+        dest="duplicate_records",
+        action="store_true",
+        help="Indicate whether we want to duplicate the problem list records when constructing artificial visits"
+    )
     ARGS = parser.parse_args()
 
     # Enable logging
@@ -399,4 +407,5 @@ if __name__ == "__main__":
         refresh_measurement=ARGS.refresh_measurement,
         aggregate_by_hour=ARGS.aggregate_by_hour,
         should_construct_artificial_visits=ARGS.should_construct_artificial_visits,
+        duplicate_records=ARGS.duplicate_records
     )
