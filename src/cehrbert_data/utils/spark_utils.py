@@ -882,6 +882,7 @@ def construct_artificial_visits(
         visit_occurrence: DataFrame,
         spark: SparkSession = None,
         persistence_folder: str = None,
+        append: bool = True
 ) -> Tuple[DataFrame, DataFrame]:
     """
     Fix visit_occurrence_id of
@@ -890,6 +891,7 @@ def construct_artificial_visits(
     :param visit_occurrence:
     :param spark:
     :param persistence_folder:
+    :param append:
     :return:
     """
     visit = visit_occurrence.select(
@@ -905,7 +907,7 @@ def construct_artificial_visits(
     )
 
     # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
-    patient_events = patient_events.join(
+    updated_patient_events = patient_events.join(
         visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
         "visit_occurrence_id"
     ).withColumn(
@@ -927,6 +929,11 @@ def construct_artificial_visits(
     ).drop(
         "visit_start_lower_bound", "visit_end_upper_bound"
     )
+
+    if append:
+        patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
+    else:
+        patient_events = updated_patient_events
 
     # Try to connect to the existing visit
     events_to_fix = patient_events.where(
