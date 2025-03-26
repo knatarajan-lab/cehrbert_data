@@ -158,9 +158,6 @@ def main(args):
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
         ).cast(t.TimestampType())
-    ).where(
-        f.col("visit_start_datetime") <=
-        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     )
 
 
