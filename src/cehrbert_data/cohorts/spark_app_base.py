@@ -647,6 +647,17 @@ class NestedCohortBuilder:
                 persistence_folder=self._output_data_folder if self._cache_events else None,
                 duplicate_records=self._duplicate_records
             )
+
+            # Update age if some of the ehr_records have been re-associated with the new visits
+            ehr_records = ehr_records.join(
+                visit_occurrence_with_artificial_visits.select(
+                    "visit_occurrence_id", "visit_start_date"
+                ), "visit_occurrence_id"
+            ).withColumn(
+                "age",
+                F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12))
+            ).drop("visit_start_date")
+
             # Refresh the dependency
             self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
 
@@ -676,8 +687,9 @@ class NestedCohortBuilder:
             else:
                 if self._is_observation_window_unbounded:
                     record_window_filter = (
-                        F.col("ehr.datetime")
-                        <= F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
+                            F.col("ehr.datetime")
+                            <= F.expr(
+                        f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                     )
                 else:
                     record_window_filter = F.col("ehr.datetime").between(

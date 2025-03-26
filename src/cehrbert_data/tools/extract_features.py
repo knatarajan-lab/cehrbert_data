@@ -13,10 +13,12 @@ from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_parse_args import create_spark_args
 from cehrbert_data.utils.spark_utils import (
     extract_ehr_records,
+    preprocess_domain_table,
     construct_artificial_visits,
     create_sequence_data_with_att,
     create_concept_frequency_data,
 )
+from cehrbert_data.const.common import PERSON, VISIT_OCCURRENCE
 
 
 class PredictionType(Enum):
@@ -128,7 +130,13 @@ def main(args):
         ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
         ehr_records = spark.read.parquet(ehr_records_temp_folder)
 
-    visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
+
+    birthdate_udf = f.coalesce(
+        "birth_datetime",
+        f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
+    )
+
+    visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
 
     if args.should_construct_artificial_visits:
         ehr_records, visit_occurrence = construct_artificial_visits(
@@ -138,6 +146,13 @@ def main(args):
             persistence_folder = str(os.path.join(args.output_folder, args.cohort_name)),
             duplicate_records=args.duplicate_records
         )
+        # Update age if some of the ehr_records have been re-associated with the new visits
+        ehr_records = ehr_records.join(
+            visit_occurrence.select("visit_occurrence_id", "visit_start_date"), "visit_occurrence_id"
+        ).withColumn(
+            "age",
+            f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
+        ).drop("visit_start_date")
 
     cohort_visit_occurrence = visit_occurrence.join(
         cohort.select("person_id", "cohort_member_id", "index_date"),
@@ -160,12 +175,7 @@ def main(args):
         ).cast(t.TimestampType())
     )
 
-
-    birthdate_udf = f.coalesce(
-        "birth_datetime",
-        f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
-    )
-    person = spark.read.parquet(os.path.join(args.input_folder, "person"))
+    person = preprocess_domain_table(spark, args.input_folder, PERSON)
     patient_demographic = person.select(
         "person_id",
         birthdate_udf.alias("birth_datetime"),

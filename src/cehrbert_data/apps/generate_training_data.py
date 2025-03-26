@@ -174,6 +174,13 @@ def main(
             persistence_folder=output_folder,
             duplicate_records=duplicate_records
         )
+        # Update age if some of the ehr_records have been re-associated with the new visits
+        patient_events = patient_events.join(
+            visit_occurrence_person.select("visit_occurrence_id", "visit_start_date"), "visit_occurrence_id"
+        ).withColumn(
+            "age",
+            F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12))
+        ).drop("visit_start_date")
 
     if is_new_patient_representation:
         sequence_data = create_sequence_data_with_att(
