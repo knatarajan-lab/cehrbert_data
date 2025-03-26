@@ -901,9 +901,9 @@ def construct_artificial_visits(
         F.coalesce("visit_start_datetime", F.to_timestamp("visit_start_date")).alias("visit_start_datetime"),
         F.coalesce("visit_end_datetime", F.to_timestamp(F.date_add(F.col("visit_end_date"), 1))).alias("visit_end_datetime"),
     ).withColumn(
-        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 1 DAYS")
+        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 2 DAYS")
     ).withColumn(
-        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 1 DAYS")
+        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 2 DAYS")
     )
 
     # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
