@@ -640,6 +640,15 @@ class NestedCohortBuilder:
             )
 
         if self._should_construct_artificial_visits:
+            person = self._dependency_dict[PERSON]
+            birthdate_udf = F.coalesce(
+                "birth_datetime",
+                F.concat("year_of_birth", F.lit("-01-01")).cast("timestamp"),
+            )
+            patient_demographic = person.select(
+                "person_id",
+                birthdate_udf.alias("birth_datetime"),
+            )
             ehr_records, visit_occurrence_with_artificial_visits = construct_artificial_visits(
                 ehr_records,
                 self._dependency_dict[VISIT_OCCURRENCE],
@@ -650,13 +659,16 @@ class NestedCohortBuilder:
 
             # Update age if some of the ehr_records have been re-associated with the new visits
             ehr_records = ehr_records.join(
+                patient_demographic,
+                "person_id"
+            ).join(
                 visit_occurrence_with_artificial_visits.select(
                     "visit_occurrence_id", "visit_start_date"
                 ), "visit_occurrence_id"
             ).withColumn(
                 "age",
                 F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12))
-            ).drop("visit_start_date")
+            ).drop("visit_start_date", "birth_datetime")
 
             # Refresh the dependency
             self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits

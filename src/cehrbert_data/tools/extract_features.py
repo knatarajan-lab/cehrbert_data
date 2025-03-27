@@ -136,6 +136,15 @@ def main(args):
         f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
     )
 
+    person = preprocess_domain_table(spark, args.input_folder, PERSON)
+    patient_demographic = person.select(
+        "person_id",
+        birthdate_udf.alias("birth_datetime"),
+        "race_concept_id",
+        "gender_concept_id",
+    )
+
+
     visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
 
     if args.should_construct_artificial_visits:
@@ -148,11 +157,14 @@ def main(args):
         )
         # Update age if some of the ehr_records have been re-associated with the new visits
         ehr_records = ehr_records.join(
+            patient_demographic.select("person_id", "birth_datetime"),
+            "person_id",
+        ).join(
             visit_occurrence.select("visit_occurrence_id", "visit_start_date"), "visit_occurrence_id"
         ).withColumn(
             "age",
             f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
-        ).drop("visit_start_date")
+        ).drop("visit_start_date", "birth_datetime")
 
     cohort_visit_occurrence = visit_occurrence.join(
         cohort.select("person_id", "cohort_member_id", "index_date"),
@@ -173,14 +185,6 @@ def main(args):
             f.col("visit_end_date").cast(t.TimestampType()),
             f.col("visit_start_datetime")
         ).cast(t.TimestampType())
-    )
-
-    person = preprocess_domain_table(spark, args.input_folder, PERSON)
-    patient_demographic = person.select(
-        "person_id",
-        birthdate_udf.alias("birth_datetime"),
-        "race_concept_id",
-        "gender_concept_id",
     )
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
