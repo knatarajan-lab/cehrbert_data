@@ -882,6 +882,7 @@ def construct_artificial_visits(
         visit_occurrence: DataFrame,
         spark: SparkSession = None,
         persistence_folder: str = None,
+        duplicate_records: bool = False
 ) -> Tuple[DataFrame, DataFrame]:
     """
     Fix visit_occurrence_id of
@@ -890,6 +891,7 @@ def construct_artificial_visits(
     :param visit_occurrence:
     :param spark:
     :param persistence_folder:
+    :param duplicate_records:
     :return:
     """
     visit = visit_occurrence.select(
@@ -899,13 +901,13 @@ def construct_artificial_visits(
         F.coalesce("visit_start_datetime", F.to_timestamp("visit_start_date")).alias("visit_start_datetime"),
         F.coalesce("visit_end_datetime", F.to_timestamp(F.date_add(F.col("visit_end_date"), 1))).alias("visit_end_datetime"),
     ).withColumn(
-        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 1 DAYS")
+        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 2 DAYS")
     ).withColumn(
-        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 1 DAYS")
+        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 2 DAYS")
     )
 
     # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
-    patient_events = patient_events.join(
+    updated_patient_events = patient_events.join(
         visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
         "visit_occurrence_id"
     ).withColumn(
@@ -927,6 +929,11 @@ def construct_artificial_visits(
     ).drop(
         "visit_start_lower_bound", "visit_end_upper_bound"
     )
+
+    if duplicate_records:
+        patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
+    else:
+        patient_events = updated_patient_events
 
     # Try to connect to the existing visit
     events_to_fix = patient_events.where(

@@ -127,6 +127,13 @@ class ClinicalEventDecorator(PatientEventDecorator):
             ).otherwise(F.col("datetime"))
         )
 
+        outpatient_datetime_udf = (
+            F.when(
+                F.col("is_inpatient") == 0,
+                F.to_timestamp("date")
+            ).otherwise(F.col("datetime"))
+        )
+
         patient_events = (
             patient_events.join(visits, ["cohort_member_id", "visit_occurrence_id"])
             .withColumn("datetime", F.to_timestamp("datetime"))
@@ -136,6 +143,7 @@ class ClinicalEventDecorator(PatientEventDecorator):
             .withColumn("visit_end_datetime", F.expr("visit_end_datetime - INTERVAL 1 MINUTE"))
             .withColumn("date", bound_medical_event_date)
             .withColumn("datetime", bound_medical_event_datetime)
+            .withColumn("datetime", outpatient_datetime_udf)
             .withColumn("concept_order", concept_order_udf)
             .withColumn("visit_concept_order", visit_concept_order_udf)
             .drop("is_inpatient", "visit_end_date", "visit_end_datetime")

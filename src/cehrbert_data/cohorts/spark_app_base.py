@@ -318,6 +318,7 @@ class NestedCohortBuilder:
             meds_format: bool = False,
             cache_events: bool = False,
             should_construct_artificial_visits: bool = False,
+            duplicate_records: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -365,6 +366,7 @@ class NestedCohortBuilder:
         self._meds_format = meds_format
         self._cache_events = cache_events
         self._should_construct_artificial_visits = should_construct_artificial_visits
+        self._duplicate_records = duplicate_records
 
         self.get_logger().info(
             f"cohort_name: {cohort_name}\n"
@@ -406,6 +408,7 @@ class NestedCohortBuilder:
             f"meds_format: {meds_format}\n"
             f"cache_events: {cache_events}\n"
             f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
+            f"duplicate_records: {duplicate_records}\n"
         )
 
         self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
@@ -637,12 +640,36 @@ class NestedCohortBuilder:
             )
 
         if self._should_construct_artificial_visits:
+            person = self._dependency_dict[PERSON]
+            birthdate_udf = F.coalesce(
+                "birth_datetime",
+                F.concat("year_of_birth", F.lit("-01-01")).cast("timestamp"),
+            )
+            patient_demographic = person.select(
+                "person_id",
+                birthdate_udf.alias("birth_datetime"),
+            )
             ehr_records, visit_occurrence_with_artificial_visits = construct_artificial_visits(
                 ehr_records,
                 self._dependency_dict[VISIT_OCCURRENCE],
                 spark=self.spark if self._cache_events else None,
                 persistence_folder=self._output_data_folder if self._cache_events else None,
+                duplicate_records=self._duplicate_records
             )
+
+            # Update age if some of the ehr_records have been re-associated with the new visits
+            ehr_records = ehr_records.join(
+                patient_demographic,
+                "person_id"
+            ).join(
+                visit_occurrence_with_artificial_visits.select(
+                    "visit_occurrence_id", "visit_start_date"
+                ), "visit_occurrence_id"
+            ).withColumn(
+                "age",
+                F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12))
+            ).drop("visit_start_date", "birth_datetime")
+
             # Refresh the dependency
             self._dependency_dict[VISIT_OCCURRENCE] = visit_occurrence_with_artificial_visits
 
@@ -672,8 +699,9 @@ class NestedCohortBuilder:
             else:
                 if self._is_observation_window_unbounded:
                     record_window_filter = (
-                        F.col("ehr.datetime")
-                        <= F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
+                            F.col("ehr.datetime")
+                            <= F.expr(
+                        f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                     )
                 else:
                     record_window_filter = F.col("ehr.datetime").between(
@@ -862,4 +890,5 @@ def create_prediction_cohort(
         meds_format=spark_args.meds_format,
         cache_events=spark_args.cache_events,
         should_construct_artificial_visits=spark_args.should_construct_artificial_visits,
+        duplicate_records=spark_args.duplicate_records,
     ).build()
