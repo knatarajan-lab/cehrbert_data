@@ -12,15 +12,14 @@ from cehrbert_data.const.common import (
     PERSON,
     VISIT_OCCURRENCE,
     DEATH,
-    MEASUREMENT
+    CONCEPT
 )
 from cehrbert_data.decorators import AttType
 from cehrbert_data.utils.spark_utils import (
     create_sequence_data,
     create_sequence_data_with_att,
-    join_domain_tables,
     preprocess_domain_table,
-    get_measurement_table,
+    extract_events_by_domain,
     validate_table_names,
     construct_artificial_visits
 )
@@ -43,7 +42,6 @@ def main(
         include_death: bool,
         att_type: AttType,
         inpatient_att_type: AttType,
-        include_sequence_information_content: bool = False,
         exclude_demographic: bool = False,
         use_age_group: bool = False,
         with_drug_rollup: bool = True,
@@ -81,17 +79,27 @@ def main(
         f"duplicate_records: {duplicate_records}\n"
     )
 
-    domain_tables = []
+    concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+    patient_ehr_events = None
     for domain_table_name in domain_table_list:
-        if domain_table_name != MEASUREMENT:
-            domain_tables.append(
-                preprocess_domain_table(
-                    spark,
-                    input_folder,
-                    domain_table_name,
-                    with_drug_rollup=with_drug_rollup,
-                )
-            )
+        domain_table = preprocess_domain_table(
+            spark=spark,
+            input_folder=input_folder,
+            domain_table_name=domain_table_name,
+            with_drug_rollup=with_drug_rollup
+        )
+        ehr_events = extract_events_by_domain(
+            domain_table,
+            spark=spark,
+            concept=concept,
+            aggregate_by_hour=aggregate_by_hour,
+            refresh=refresh_measurement,
+            persistence_folder=input_folder
+        )
+        if patient_ehr_events is None:
+            patient_ehr_events = ehr_events
+        else:
+            patient_ehr_events = patient_ehr_events.unionByName(ehr_events)
 
     visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
     visit_occurrence = visit_occurrence.select(
@@ -121,35 +129,17 @@ def main(
 
     death = preprocess_domain_table(spark, input_folder, DEATH) if include_death else None
 
-    patient_events = join_domain_tables(domain_tables)
-
-    if include_concept_list and patient_events:
-        column_names = patient_events.schema.fieldNames()
+    if include_concept_list and patient_ehr_events:
         # Filter out concepts
-        qualified_concepts = preprocess_domain_table(spark, input_folder, "qualified_concept_list").select(
-            "standard_concept_id"
+        qualified_concepts = preprocess_domain_table(spark, input_folder, "qualified_concept_list")
+        patient_ehr_events = patient_ehr_events.join(
+            qualified_concepts.select("standard_concept_id"), "standard_concept_id"
         )
 
-        patient_events = patient_events.join(qualified_concepts, "standard_concept_id").select(column_names)
-
-    # Process the measurement table if exists
-    if MEASUREMENT in domain_table_list:
-        processed_measurement = get_measurement_table(
-            spark,
-            input_folder,
-            refresh=refresh_measurement,
-            aggregate_by_hour=aggregate_by_hour,
-        )
-        if patient_events:
-            # Union all measurement records together with other domain records
-            patient_events = patient_events.unionByName(processed_measurement)
-        else:
-            patient_events = processed_measurement
-
-    patient_events = (
-        patient_events.join(visit_occurrence_person, "visit_occurrence_id")
+    patient_ehr_events = (
+        patient_ehr_events.join(visit_occurrence_person, "visit_occurrence_id")
         .select(
-            [patient_events[fieldName] for fieldName in patient_events.schema.fieldNames()]
+            [patient_ehr_events[fieldName] for fieldName in patient_ehr_events.schema.fieldNames()]
             + ["visit_concept_id", "age"]
         )
         .withColumn("cohort_member_id", F.col("person_id"))
@@ -158,24 +148,23 @@ def main(
     # Apply the age security measure
     # We only keep the patient records, whose corresponding age is less than 90
     if apply_age_filter:
-        patient_events = patient_events.where(F.col("age") < 90)
+        patient_ehr_events = patient_ehr_events.where(F.col("age") < 90)
 
     if not continue_from_events:
-        patient_events.write.mode("overwrite").parquet(os.path.join(output_folder, "all_patient_events"))
+        patient_ehr_events.write.mode("overwrite").parquet(os.path.join(output_folder, "all_patient_events"))
 
-    patient_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
-
+    patient_ehr_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
     if should_construct_artificial_visits:
         # Construct artificial visits or re-link the visits for the problem list events
-        patient_events, visit_occurrence_person = construct_artificial_visits(
-            patient_events,
+        patient_ehr_events, visit_occurrence_person = construct_artificial_visits(
+            patient_ehr_events,
             visit_occurrence_person,
             spark=spark,
             persistence_folder=output_folder,
             duplicate_records=duplicate_records
         )
         # Update age if some of the ehr_records have been re-associated with the new visits
-        patient_events = patient_events.join(
+        patient_ehr_events = patient_ehr_events.join(
             person.select("person_id", "birth_datetime"),
             "person_id",
         ).join(
@@ -186,8 +175,8 @@ def main(
         ).drop("visit_start_date", "birth_datetime")
 
     if is_new_patient_representation:
-        sequence_data = create_sequence_data_with_att(
-            patient_events,
+        patient_sequence_data = create_sequence_data_with_att(
+            patient_ehr_events,
             visit_occurrence_person,
             date_filter=date_filter,
             include_visit_type=include_visit_type,
@@ -203,8 +192,8 @@ def main(
             persistence_folder=output_folder,
         )
     else:
-        sequence_data = create_sequence_data(
-            patient_events,
+        patient_sequence_data = create_sequence_data(
+            patient_ehr_events,
             date_filter=date_filter,
             include_visit_type=include_visit_type,
             classic_bert_seq=is_classic_bert,
@@ -228,44 +217,31 @@ def main(
             )
             .distinct()
         )
-        sequence_data = sequence_data.join(visit_occurrence, "person_id")
-
-    if include_sequence_information_content:
-        concept_df = patient_events.select("person_id", F.col("standard_concept_id").alias("concept_id"))
-        concept_freq = (
-            concept_df.groupBy("concept_id")
-            .count()
-            .withColumn("prob", F.col("count") / F.sum("count").over(Window.partitionBy()))
-            .withColumn("ic", -F.log("prob"))
-        )
-
-        patient_ic_df = concept_df.join(concept_freq, "concept_id").groupby("person_id").agg(F.mean("ic").alias("ic"))
-
-        sequence_data = sequence_data.join(patient_ic_df, "person_id")
+        patient_sequence_data = patient_sequence_data.join(visit_occurrence, "person_id")
 
     patient_splits_folder = os.path.join(input_folder, "patient_splits")
     if os.path.exists(patient_splits_folder):
         patient_splits = spark.read.parquet(patient_splits_folder)
         temp_folder = os.path.join(output_folder, "patient_sequence", "temp")
-        sequence_data.join(
+        patient_sequence_data.join(
             patient_splits.select("person_id", "split"),
             "person_id"
         ).write.mode("overwrite").parquet(
             temp_folder
         )
-        sequence_data = spark.read.parquet(temp_folder)
-        sequence_data.where('split="train"').write.mode("overwrite").parquet(
+        patient_sequence_data = spark.read.parquet(temp_folder)
+        patient_sequence_data.where('split="train"').write.mode("overwrite").parquet(
             os.path.join(output_folder, "patient_sequence/train")
         )
-        sequence_data.where('split="test"').write.mode("overwrite").parquet(
+        patient_sequence_data.where('split="test"').write.mode("overwrite").parquet(
             os.path.join(output_folder, "patient_sequence/test")
         )
         shutil.rmtree(temp_folder)
     else:
-        sequence_data.write.mode("overwrite").parquet(os.path.join(output_folder, "patient_sequence"))
+        patient_sequence_data.write.mode("overwrite").parquet(os.path.join(output_folder, "patient_sequence"))
 
 
-if __name__ == "__main__":
+def create_argparser():
     parser = argparse.ArgumentParser(description="Arguments for generate training data for Bert")
     parser.add_argument(
         "-i",
@@ -388,7 +364,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Indicate whether we want to duplicate the problem list records when constructing artificial visits"
     )
-    ARGS = parser.parse_args()
+    return parser
+
+
+if __name__ == "__main__":
+    ARGS = create_argparser().parse_args()
 
     # Enable logging
     add_console_logging()

@@ -2,7 +2,7 @@ import argparse
 import logging
 import os.path
 from os import path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import pandas as pd
 import pyspark.sql.functions as F
@@ -15,7 +15,9 @@ from pyspark.sql import DataFrame, SparkSession
 from cehrbert_data.config.output_names import QUALIFIED_CONCEPT_LIST_PATH
 from cehrbert_data.const.common import (
     MEASUREMENT,
+    OBSERVATION,
     PROCESSED_MEASUREMENT,
+    PROCESSED_OBSERVATION,
     REQUIRED_MEASUREMENT,
     NUMERIC_MEASUREMENT_STATS,
     CATEGORICAL_MEASUREMENT,
@@ -146,15 +148,10 @@ def get_domain_field(domain_table: DataFrame) -> str:
     return get_concept_id_field(domain_table).replace("_concept_id", "")
 
 
-def create_file_path(input_folder: str, table_name: str):
-    if input_folder[-1] == "/":
-        file_path = input_folder + table_name
-    else:
-        file_path = input_folder + "/" + table_name
-    return file_path
-
-
-def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
+def extract_events_by_domain(
+        domain_table: DataFrame,
+        **kwargs
+) -> DataFrame:
     """Standardize the format of OMOP domain tables using a time frame.
     Keyword arguments:
     domain_tables -- the array containing the OMOP domain tables except visit_occurrence
@@ -165,51 +162,65 @@ def join_domain_tables(domain_tables: List[DataFrame]) -> DataFrame:
     In this case, co-occurrence is defined as those concept ids that have co-occurred
     within the same time window of a patient.
     """
-    patient_event = None
+    ehr_events = None
+    # extract the domain concept_id from the table fields. E.g. condition_concept_id from
+    # condition_occurrence extract the domain start_date column extract the name of the table
+    for (
+            concept_id_field,
+            date_field,
+            datetime_field,
+            domain_table_name
+    ) in get_key_fields(domain_table):
 
-    for domain_table in domain_tables:
-        # extract the domain concept_id from the table fields. E.g. condition_concept_id from
-        # condition_occurrence extract the domain start_date column extract the name of the table
-        for (
-                concept_id_field,
-                date_field,
-                datetime_field,
-                table_domain_field
-        ) in get_key_fields(domain_table):
+        if domain_table_name in [MEASUREMENT, OBSERVATION]:
+            concept = kwargs.get("concept")
+            spark = kwargs.get("spark", None)
+            persistence_folder = kwargs.get("persistence_folder", None)
+            refresh = kwargs.get("refresh_measurement", False)
+            aggregate_by_hour = kwargs.get("aggregate_by_hour", False)
+            get_events_func = get_measurement_events if domain_table_name == MEASUREMENT else get_observation_events
+            domain_records = get_events_func(
+                domain_table,
+                concept=concept,
+                refresh=refresh,
+                spark=spark,
+                persistence_folder=persistence_folder,
+                aggregate_by_hour=aggregate_by_hour
+            )
+        else:
             # Remove records that don't have a date or standard_concept_id
-            filtered_domain_table = domain_table.where(F.col(date_field).isNotNull()).where(
+            domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
                 F.col(concept_id_field).isNotNull()
             )
             datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field), "yyyy-MM-dd HH:mm:ss")
-            filtered_domain_table = (
-                filtered_domain_table.where(F.col(concept_id_field).cast("string") != "0")
+            domain_records = (
+                domain_records.where(F.col(concept_id_field).cast("string") != "0")
                 .withColumn("date", F.to_date(F.col(date_field)))
                 .withColumn("datetime", datetime_field_udf)
             )
-
-            filtered_domain_table = filtered_domain_table.select(
-                filtered_domain_table["person_id"],
-                filtered_domain_table[concept_id_field].alias("standard_concept_id"),
-                filtered_domain_table["date"].cast("date"),
-                filtered_domain_table["datetime"].cast(T.TimestampType()),
-                filtered_domain_table["visit_occurrence_id"],
-                F.lit(table_domain_field).alias("domain"),
+            domain_records = domain_records.select(
+                domain_records["person_id"],
+                domain_records[concept_id_field].alias("standard_concept_id"),
+                domain_records["date"].cast("date"),
+                domain_records["datetime"].cast(T.TimestampType()),
+                domain_records["visit_occurrence_id"],
+                F.lit(domain_table_name).alias("domain"),
                 F.lit(None).cast("string").alias("event_group_id"),
                 F.lit(None).cast("float").alias("number_as_value"),
                 F.lit(None).cast("string").alias("concept_as_value"),
-                F.col("unit") if domain_has_unit(filtered_domain_table) else F.lit(NA).alias("unit"),
+                F.col("unit") if domain_has_unit(domain_records) else F.lit(NA).alias("unit"),
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence
-            if filtered_domain_table == "condition_occurrence":
-                filtered_domain_table = filtered_domain_table.where("condition_concept_id != 4216643")
+            if domain_table_name == "condition_occurrence":
+                domain_records = domain_records.where("condition_concept_id != 4216643")
 
-            if patient_event is None:
-                patient_event = filtered_domain_table
-            else:
-                patient_event = patient_event.unionByName(filtered_domain_table)
+        if ehr_events is None:
+            ehr_events = domain_records
+        else:
+            ehr_events = ehr_events.unionByName(domain_records)
 
-    return patient_event
+    return ehr_events
 
 
 def preprocess_domain_table(
@@ -219,8 +230,7 @@ def preprocess_domain_table(
         with_diagnosis_rollup=False,
         with_drug_rollup=True,
 ):
-    domain_table = spark.read.parquet(create_file_path(input_folder, domain_table_name))
-
+    domain_table = spark.read.parquet(os.path.join(input_folder, domain_table_name))
     if "concept" in domain_table_name.lower():
         return domain_table
 
@@ -243,30 +253,30 @@ def preprocess_domain_table(
     if with_drug_rollup:
         if (
                 domain_table_name == "drug_exposure"
-                and path.exists(create_file_path(input_folder, "concept"))
-                and path.exists(create_file_path(input_folder, "concept_ancestor"))
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_ancestor"))
         ):
-            concept = spark.read.parquet(create_file_path(input_folder, "concept"))
-            concept_ancestor = spark.read.parquet(create_file_path(input_folder, "concept_ancestor"))
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
             domain_table = roll_up_to_drug_ingredients(domain_table, concept, concept_ancestor)
 
     if with_diagnosis_rollup:
         if (
                 domain_table_name == "condition_occurrence"
-                and path.exists(create_file_path(input_folder, "concept"))
-                and path.exists(create_file_path(input_folder, "concept_relationship"))
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
         ):
-            concept = spark.read.parquet(create_file_path(input_folder, "concept"))
-            concept_relationship = spark.read.parquet(create_file_path(input_folder, "concept_relationship"))
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
             domain_table = roll_up_diagnosis(domain_table, concept, concept_relationship)
 
         if (
                 domain_table_name == "procedure_occurrence"
-                and path.exists(create_file_path(input_folder, "concept"))
-                and path.exists(create_file_path(input_folder, "concept_ancestor"))
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_ancestor"))
         ):
-            concept = spark.read.parquet(create_file_path(input_folder, "concept"))
-            concept_ancestor = spark.read.parquet(create_file_path(input_folder, "concept_ancestor"))
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
             domain_table = roll_up_procedure(domain_table, concept, concept_ancestor)
 
     return domain_table
@@ -899,7 +909,8 @@ def construct_artificial_visits(
         F.col("visit_occurrence_id"),
         F.col("visit_concept_id"),
         F.coalesce("visit_start_datetime", F.to_timestamp("visit_start_date")).alias("visit_start_datetime"),
-        F.coalesce("visit_end_datetime", F.to_timestamp(F.date_add(F.col("visit_end_date"), 1))).alias("visit_end_datetime"),
+        F.coalesce("visit_end_datetime", F.to_timestamp(F.date_add(F.col("visit_end_date"), 1))).alias(
+            "visit_end_datetime"),
     ).withColumn(
         "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 2 DAYS")
     ).withColumn(
@@ -1040,7 +1051,7 @@ def extract_ehr_records(
         domain_table_list: List[str],
         include_visit_type: bool = False,
         with_diagnosis_rollup: bool = False,
-        with_drug_rollup: bool = True,
+        with_drug_rollup: bool = False,
         include_concept_list: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = False,
@@ -1059,19 +1070,28 @@ def extract_ehr_records(
     :param aggregate_by_hour:
     :return:
     """
-    domain_tables = []
+    concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+    patient_ehr_records = None
     for domain_table_name in domain_table_list:
-        if domain_table_name != MEASUREMENT:
-            domain_tables.append(
-                preprocess_domain_table(
-                    spark=spark,
-                    input_folder=input_folder,
-                    domain_table_name=domain_table_name,
-                    with_diagnosis_rollup=with_diagnosis_rollup,
-                    with_drug_rollup=with_drug_rollup
-                )
-            )
-    patient_ehr_records = join_domain_tables(domain_tables)
+        domain_table = preprocess_domain_table(
+            spark=spark,
+            input_folder=input_folder,
+            domain_table_name=domain_table_name,
+            with_diagnosis_rollup=with_diagnosis_rollup,
+            with_drug_rollup=with_drug_rollup
+        )
+        ehr_events = extract_events_by_domain(
+            domain_table,
+            spark=spark,
+            concept=concept,
+            aggregate_by_hour=aggregate_by_hour,
+            refresh=refresh_measurement,
+            persistence_folder=input_folder
+        )
+        if patient_ehr_records is None:
+            patient_ehr_records = ehr_events
+        else:
+            patient_ehr_records = patient_ehr_records.unionByName(ehr_events)
 
     if include_concept_list and patient_ehr_records:
         # Filter out concepts
@@ -1080,21 +1100,7 @@ def extract_ehr_records(
         )
         patient_ehr_records = patient_ehr_records.join(qualified_concepts, "standard_concept_id")
 
-    # Process the measurement table if exists
-    if MEASUREMENT in domain_table_list:
-        processed_measurement = get_measurement_table(
-            spark,
-            input_folder,
-            refresh=refresh_measurement,
-            aggregate_by_hour=aggregate_by_hour,
-        )
-        if patient_ehr_records:
-            # Union all measurement records together with other domain records
-            patient_ehr_records = patient_ehr_records.unionByName(processed_measurement)
-        else:
-            patient_ehr_records = processed_measurement
-
-    patient_ehr_records = patient_ehr_records.where("visit_occurrence_id IS NOT NULL").distinct()
+    patient_ehr_records = patient_ehr_records.where(F.col("visit_occurrence_id").isNotNull()).distinct()
     person = preprocess_domain_table(spark, input_folder, PERSON)
     person = person.withColumn(
         "birth_datetime",
@@ -1126,7 +1132,6 @@ def extract_ehr_records(
             visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
         )
-
     return patient_ehr_records
 
 
@@ -1569,79 +1574,35 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
     )
 
 
-def get_measurement_table(
-        spark: SparkSession,
-        input_folder: str,
-        refresh: bool = False,
+def get_measurement_events(
+        measurement: DataFrame,
+        concept: DataFrame,
         aggregate_by_hour: bool = False,
+        refresh: bool = False,
+        spark: SparkSession = None,
+        persistence_folder: str = None,
 ) -> DataFrame:
     """
-    A helper function to process and create the measurement table
-
-    :param spark:
-    :param input_folder:
-    :param refresh:
-    :param aggregate_by_hour:
-
-    :return:
-    """
-
-    measurement = preprocess_domain_table(spark, input_folder, MEASUREMENT)
-    # The required_measurement table must exist
-    if not os.path.exists(os.path.join(input_folder, REQUIRED_MEASUREMENT)):
-        raise RuntimeError(f"{REQUIRED_MEASUREMENT} needs to be provided when measurement is included!")
-    required_measurement = preprocess_domain_table(spark, input_folder, REQUIRED_MEASUREMENT)
-    # The measurement_stats table must exist
-    if not os.path.exists(os.path.join(input_folder, NUMERIC_MEASUREMENT_STATS)):
-        raise RuntimeError(f"{NUMERIC_MEASUREMENT_STATS} needs to be provided when measurement is included!")
-    measurement_stats = preprocess_domain_table(spark, input_folder, NUMERIC_MEASUREMENT_STATS)
-    # The concept table must exist
-    if not os.path.exists(os.path.join(input_folder, CONCEPT)):
-        raise RuntimeError(f"{CONCEPT} needs to be provided when measurement is included!")
-    concept = preprocess_domain_table(spark, input_folder, CONCEPT)
-    # The select is necessary to make sure the order of the columns is the same as the
-    # original dataframe, otherwise the union might use the wrong columns
-    if os.path.exists(os.path.join(input_folder, PROCESSED_MEASUREMENT)) and not refresh:
-        processed_measurement = preprocess_domain_table(spark, input_folder, PROCESSED_MEASUREMENT)
-    else:
-        processed_measurement = process_measurement(
-            spark, measurement, required_measurement, measurement_stats, concept, aggregate_by_hour
-        )
-        processed_measurement.write.mode("overwrite").parquet(os.path.join(input_folder, PROCESSED_MEASUREMENT))
-
-    return processed_measurement
-
-
-def process_measurement(
-        spark,
-        measurement: DataFrame,
-        required_measurement: DataFrame,
-        measurement_stats: DataFrame,
-        concept: DataFrame,
-        aggregate_by_hour: bool = False
-):
-    """
-    Preprocess the measurement table and only include the measurements whose measurement_concept_ids are specified
-    in required_measurement. Add the standard unit as an additional column
+    Extract medical events from the measurement table
 
     spark: :param
     measurement: :param
-    required_measurement:
     concept:
 
     :return:
     """
+
+    if persistence_folder and spark:
+        measurement_events_data_path = os.path.join(persistence_folder, PROCESSED_MEASUREMENT)
+        if os.path.exists(measurement_events_data_path) and not refresh:
+            return preprocess_domain_table(spark, persistence_folder, PROCESSED_MEASUREMENT)
+
     # Register the tables in spark context
     concept.createOrReplaceTempView(CONCEPT)
     measurement.createOrReplaceTempView(MEASUREMENT)
-    required_measurement.createOrReplaceTempView(REQUIRED_MEASUREMENT)
-    # Broadcast df to local executors
-    broadcast(measurement_stats)
-    # Create the temp view for this dataframe
-    measurement_stats.createOrReplaceTempView("measurement_unit_stats")
-    numeric_lab = spark.sql(
+    measurement_events = spark.sql(
         """
-        SELECT
+        SELECT DISTINCT
             m.person_id,
             m.measurement_concept_id AS standard_concept_id,
             CAST(m.measurement_date AS DATE) AS date,
@@ -1650,21 +1611,20 @@ def process_measurement(
             'measurement' AS domain,
             CAST(NULL AS STRING) AS event_group_id,
             m.value_as_number AS number_as_value,
-            CAST(NULL AS STRING) AS concept_as_value,
-            c.concept_code AS unit
+            CAST(m.value_as_concept_id AS STRING) AS concept_as_value,
+            COALESCE(c.concept_code, m.unit_source_value) AS unit
         FROM measurement AS m
-        JOIN measurement_unit_stats AS s
-            ON s.measurement_concept_id = m.measurement_concept_id AND s.unit_concept_id = m.unit_concept_id
-        JOIN concept AS c
+        LEFT JOIN concept AS c
             ON m.unit_concept_id = c.concept_id
-        WHERE m.visit_occurrence_id IS NOT NULL
-            AND m.value_as_number IS NOT NULL
-            AND m.value_as_number BETWEEN s.lower_bound AND s.upper_bound
-    """
+        """
     )
+    numeric_events = measurement_events.where(F.col("value_as_number").isNotNull())
+    numeric_events = clean_up_unit(numeric_events)
+    non_numeric_events = measurement_events.where(F.col("value_as_number").isNull())
+
     if aggregate_by_hour:
-        numeric_lab = numeric_lab.withColumn("lab_hour", F.hour("datetime"))
-        numeric_lab = numeric_lab.groupby(
+        numeric_events = numeric_events.withColumn("lab_hour", F.hour("datetime"))
+        numeric_events = numeric_events.groupby(
             "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "lab_hour"
         ).agg(
             F.min("datetime").alias("datetime"),
@@ -1677,33 +1637,83 @@ def process_measurement(
             "event_group_id", F.lit(None).cast("string")
         ).drop("lab_hour")
 
-    numeric_lab = clean_up_unit(numeric_lab)
-    # For categorical measurements in required_measurement, we concatenate measurement_concept_id
-    # with value_as_concept_id to construct a new standard_concept_id
-    categorical_lab = spark.sql(
+    measurement_events = numeric_events.unionByName(non_numeric_events)
+    if spark and persistence_folder:
+        measurement_events_data_path = os.path.join(persistence_folder, PROCESSED_MEASUREMENT)
+        measurement_events.write.mode("overwrite").parquet(measurement_events_data_path)
+        measurement_events = spark.read.parquet(measurement_events_data_path)
+    return measurement_events
+
+
+def get_observation_events(
+        observation: DataFrame,
+        concept: DataFrame,
+        aggregate_by_hour: bool = False,
+        refresh: bool = False,
+        spark: SparkSession = None,
+        persistence_folder: str = None,
+):
+    """
+    Extract medical events from the observation table
+
+    spark: :param
+    measurement: :param
+    required_measurement:
+    concept:
+
+    :return:
+    """
+
+    if spark and persistence_folder:
+        observation_events_data_path = os.path.join(persistence_folder, PROCESSED_OBSERVATION)
+        if os.path.exists(observation_events_data_path) and not refresh:
+            return preprocess_domain_table(spark, persistence_folder, PROCESSED_OBSERVATION)
+
+    # Register the tables in spark context
+    concept.createOrReplaceTempView(CONCEPT)
+    observation.createOrReplaceTempView(OBSERVATION)
+    observation_events = spark.sql(
         """
-        SELECT
-            m.person_id,
-            measurement_concept_id AS standard_concept_id,
-            CAST(m.measurement_date AS DATE) AS date,
-            CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
-            m.visit_occurrence_id AS visit_occurrence_id,
-            'categorical_measurement' AS domain,
-            CONCAT('mea-', CAST(m.measurement_id AS STRING)) AS event_group_id,
-            CAST(NULL AS FLOAT) AS number_as_value,
-            CAST(COALESCE(value_as_concept_id, 0) AS STRING) AS concept_as_value,
-            'N/A' AS unit
-        FROM measurement AS m
-        WHERE EXISTS (
-            SELECT
-                1
-            FROM required_measurement AS r
-            WHERE r.measurement_concept_id = m.measurement_concept_id
-            AND r.is_numeric = false
-        )
+        SELECT DISTINCT
+            o.person_id,
+            o.observation_concept_id AS standard_concept_id,
+            CAST(o.observation_date AS DATE) AS date,
+            CAST(COALESCE(o.observation_datetime, o.observation_date) AS TIMESTAMP) AS datetime,
+            o.visit_occurrence_id AS visit_occurrence_id,
+            'observation' AS domain,
+            CAST(NULL AS STRING) AS event_group_id,
+            o.value_as_number AS number_as_value,
+            CAST(o.value_as_concept_id AS STRING) AS concept_as_value,
+            COALESCE(c.concept_code, o.unit_source_value) AS unit
+        FROM observation AS o
+        LEFT JOIN concept AS c
+            ON o.unit_concept_id = c.concept_id
     """
     )
-    return numeric_lab.unionByName(categorical_lab)
+    numeric_events = observation_events.where(F.col("value_as_number").isNotNull())
+    numeric_events = clean_up_unit(numeric_events)
+    non_numeric_events = observation_events.where(F.col("value_as_number").isNull())
+    if aggregate_by_hour:
+        numeric_events = numeric_events.withColumn("lab_hour", F.hour("datetime"))
+        numeric_events = numeric_events.groupby(
+            "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "lab_hour"
+        ).agg(
+            F.min("datetime").alias("datetime"),
+            F.avg("number_as_value").alias("number_as_value"),
+        ).withColumn(
+            "domain", F.lit("observation").cast("string")
+        ).withColumn(
+            "concept_as_value", F.lit(None).cast("string")
+        ).withColumn(
+            "event_group_id", F.lit(None).cast("string")
+        ).drop("lab_hour")
+
+    observation_events = numeric_events.unionByName(non_numeric_events)
+    if spark and persistence_folder:
+        observation_events_data_path = os.path.join(persistence_folder, PROCESSED_OBSERVATION)
+        observation_events.write.mode("overwrite").parquet(observation_events_data_path)
+        observation_events = spark.read.parquet(observation_events_data_path)
+    return observation_events
 
 
 def get_mlm_skip_domains(spark, input_folder, mlm_skip_table_list):
