@@ -1012,9 +1012,9 @@ def get_measurement_events(
             ON m.unit_concept_id = c.concept_id
         """
     )
-    numeric_events = measurement_events.where(F.col("value_as_number").isNotNull())
+    numeric_events = measurement_events.where(F.col("number_as_value").isNotNull())
     numeric_events = clean_up_unit(numeric_events)
-    non_numeric_events = measurement_events.where(F.col("value_as_number").isNull())
+    non_numeric_events = measurement_events.where(F.col("number_as_value").isNull())
 
     if aggregate_by_hour:
         numeric_events = numeric_events.withColumn("lab_hour", F.hour("datetime"))
@@ -1084,9 +1084,9 @@ def get_observation_events(
             ON o.unit_concept_id = c.concept_id
     """
     )
-    numeric_events = observation_events.where(F.col("value_as_number").isNotNull())
+    numeric_events = observation_events.where(F.col("number_as_value").isNotNull())
     numeric_events = clean_up_unit(numeric_events)
-    non_numeric_events = observation_events.where(F.col("value_as_number").isNull())
+    non_numeric_events = observation_events.where(F.col("number_as_value").isNull())
     if aggregate_by_hour:
         numeric_events = numeric_events.withColumn("lab_hour", F.hour("datetime"))
         numeric_events = numeric_events.groupby(
