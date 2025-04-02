@@ -15,8 +15,10 @@ from cehrbert_data.config.output_names import QUALIFIED_CONCEPT_LIST_PATH
 from cehrbert_data.const.common import (
     MEASUREMENT,
     OBSERVATION,
+    DEVICE_EXPOSURE,
     PROCESSED_MEASUREMENT,
     PROCESSED_OBSERVATION,
+    PROCESSED_DEVICE,
     CDM_TABLES,
     PERSON,
     VISIT_OCCURRENCE,
@@ -169,13 +171,22 @@ def extract_events_by_domain(
             domain_table_name
     ) in get_key_fields(domain_table):
 
-        if domain_table_name in [MEASUREMENT, OBSERVATION]:
+        if domain_table_name in [MEASUREMENT, OBSERVATION, DEVICE_EXPOSURE]:
             concept = kwargs.get("concept")
             spark = kwargs.get("spark", None)
             persistence_folder = kwargs.get("persistence_folder", None)
             refresh = kwargs.get("refresh_measurement", False)
             aggregate_by_hour = kwargs.get("aggregate_by_hour", False)
-            get_events_func = get_measurement_events if domain_table_name == MEASUREMENT else get_observation_events
+
+            if domain_table_name == MEASUREMENT:
+                get_events_func = get_measurement_events
+            elif domain_table_name == OBSERVATION:
+                get_events_func = get_observation_events
+            elif domain_table_name == DEVICE_EXPOSURE:
+                get_events_func = get_device_events
+            else:
+                raise RuntimeError("Cannot extract events by domain table")
+
             domain_records = get_events_func(
                 domain_table,
                 concept=concept,
@@ -1108,6 +1119,77 @@ def get_observation_events(
         observation_events.write.mode("overwrite").parquet(observation_events_data_path)
         observation_events = spark.read.parquet(observation_events_data_path)
     return observation_events
+
+
+def get_device_events(
+        device_exposure: DataFrame,
+        concept: DataFrame,
+        aggregate_by_hour: bool = False,
+        refresh: bool = False,
+        spark: SparkSession = None,
+        persistence_folder: str = None,
+) -> DataFrame:
+    """
+    Extract medical events from the measurement table
+
+    spark: :param
+    measurement: :param
+    concept:
+
+    :return:
+    """
+
+    if persistence_folder and spark:
+        device_events_data_path = os.path.join(persistence_folder, PROCESSED_DEVICE)
+        if os.path.exists(device_events_data_path) and not refresh:
+            return preprocess_domain_table(spark, persistence_folder, PROCESSED_DEVICE)
+
+    # Register the tables in spark context
+    concept.createOrReplaceTempView(CONCEPT)
+    device_exposure.createOrReplaceTempView(DEVICE_EXPOSURE)
+    device_events = spark.sql(
+        """
+        SELECT DISTINCT
+            d.person_id,
+            d.device_concept_id AS standard_concept_id,
+            CAST(d.device_exposure_start_date AS DATE) AS date,
+            CAST(COALESCE(d.device_exposure_start_datetime, d.device_exposure_start_date) AS TIMESTAMP) AS datetime,
+            d.visit_occurrence_id AS visit_occurrence_id,
+            'device' AS domain,
+            CAST(NULL AS STRING) AS event_group_id,
+            d.quantity AS number_as_value,
+            CAST(NULL AS STRING) AS concept_as_value,
+            COALESCE(c.concept_code, d.unit_source_value) AS unit
+        FROM device_exposure AS d
+        LEFT JOIN concept AS c
+            ON d.unit_concept_id = c.concept_id
+        """
+    )
+    numeric_events = device_events.where(F.col("number_as_value").isNotNull())
+    numeric_events = clean_up_unit(numeric_events)
+    non_numeric_events = device_events.where(F.col("number_as_value").isNull())
+
+    if aggregate_by_hour:
+        numeric_events = numeric_events.withColumn("lab_hour", F.hour("datetime"))
+        numeric_events = numeric_events.groupby(
+            "person_id", "visit_occurrence_id", "standard_concept_id", "unit", "date", "lab_hour"
+        ).agg(
+            F.min("datetime").alias("datetime"),
+            F.avg("number_as_value").alias("number_as_value"),
+        ).withColumn(
+            "domain", F.lit("device").cast("string")
+        ).withColumn(
+            "concept_as_value", F.lit(None).cast("string")
+        ).withColumn(
+            "event_group_id", F.lit(None).cast("string")
+        ).drop("lab_hour")
+
+    device_events = numeric_events.unionByName(non_numeric_events)
+    if spark and persistence_folder:
+        device_events_data_path = os.path.join(persistence_folder, PROCESSED_DEVICE)
+        device_events.write.mode("overwrite").parquet(device_events_data_path)
+        device_events = spark.read.parquet(device_events_data_path)
+    return device_events
 
 
 def get_mlm_skip_domains(spark, input_folder, mlm_skip_table_list):
