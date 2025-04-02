@@ -242,9 +242,8 @@ def main(
 
 
 def create_argparser():
-    parser = argparse.ArgumentParser(description="Arguments for generate training data for Bert")
+    parser = argparse.ArgumentParser(description="Arguments for generate training data for CEHR-Bert/GPT")
     parser.add_argument(
-        "-i",
         "--input_folder",
         dest="input_folder",
         action="store",
@@ -252,7 +251,6 @@ def create_argparser():
         required=True,
     )
     parser.add_argument(
-        "-o",
         "--output_folder",
         dest="output_folder",
         action="store",
@@ -260,7 +258,6 @@ def create_argparser():
         required=True,
     )
     parser.add_argument(
-        "-tc",
         "--domain_table_list",
         dest="domain_table_list",
         nargs="+",
