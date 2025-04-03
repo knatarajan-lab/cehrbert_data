@@ -147,6 +147,13 @@ def get_domain_field(domain_table: DataFrame) -> str:
     return get_concept_id_field(domain_table).replace("_concept_id", "")
 
 
+def is_domain_numeric(domain_table_name: str) -> bool:
+    for numeric_domain_table in [MEASUREMENT, OBSERVATION, DEVICE_EXPOSURE]:
+        if numeric_domain_table.startswith(domain_table_name):
+            return True
+    return False
+
+
 def extract_events_by_domain(
         domain_table: DataFrame,
         **kwargs
@@ -171,7 +178,7 @@ def extract_events_by_domain(
             domain_table_name
     ) in get_key_fields(domain_table):
 
-        if domain_table_name in [MEASUREMENT, OBSERVATION, DEVICE_EXPOSURE]:
+        if is_domain_numeric(domain_table_name):
             concept = kwargs.get("concept")
             spark = kwargs.get("spark", None)
             persistence_folder = kwargs.get("persistence_folder", None)
@@ -182,7 +189,7 @@ def extract_events_by_domain(
                 get_events_func = get_measurement_events
             elif domain_table_name == OBSERVATION:
                 get_events_func = get_observation_events
-            elif domain_table_name == DEVICE_EXPOSURE:
+            elif DEVICE_EXPOSURE.startswith(domain_table_name):
                 get_events_func = get_device_events
             else:
                 raise RuntimeError("Cannot extract events by domain table")
