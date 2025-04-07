@@ -1,8 +1,7 @@
-import os.path
-
 from ..const.common import (
     MEASUREMENT,
     CATEGORICAL_MEASUREMENT,
+    OBSERVATION,
 )
 from pyspark.sql import SparkSession, DataFrame, functions as F, Window as W, types as T
 
@@ -162,9 +161,9 @@ class ClinicalEventDecorator(PatientEventDecorator):
         # Create the concept_value_mask field to indicate whether domain values should be skipped
         # As of now only measurement has values, so other domains would be skipped.
         patient_events = patient_events.withColumn(
-            "concept_value_mask", (F.col("domain").isin(MEASUREMENT, CATEGORICAL_MEASUREMENT)).cast("int")
+            "concept_value_mask", (F.col("number_as_value").isNotNull() | F.col("concept_as_value").isNotNull()).cast("int")
         ).withColumn(
-            "is_numeric_type", (F.col("domain") == MEASUREMENT).cast("int")
+            "is_numeric_type", F.col("number_as_value").isNotNull().cast("int")
         ).withColumn(
             "mlm_skip_value",
             (F.col("domain").isin([MEASUREMENT, CATEGORICAL_MEASUREMENT])).cast("int"),

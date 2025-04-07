@@ -13,15 +13,16 @@ from pyspark.sql.window import Window
 from cehrbert_data.decorators import AttType
 from cehrbert_data.const.common import VISIT_OCCURRENCE
 from cehrbert_data.utils.spark_utils import (
-    build_ancestry_table_for,
     create_concept_frequency_data,
-    create_hierarchical_sequence_data,
     create_sequence_data,
     create_sequence_data_with_att,
     extract_ehr_records,
-    get_descendant_concept_ids,
     preprocess_domain_table,
     construct_artificial_visits
+)
+from cehrbert_data.utils.vocab_utils import (
+    build_ancestry_table_for,
+    get_descendant_concept_ids
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -300,7 +301,6 @@ class NestedCohortBuilder:
             aggregate_by_hour: bool = True,
             is_new_patient_representation: bool = False,
             gpt_patient_sequence: bool = False,
-            is_hierarchical_bert: bool = False,
             classic_bert_seq: bool = False,
             is_first_time_outcome: bool = False,
             is_questionable_outcome_existed: bool = False,
@@ -343,7 +343,6 @@ class NestedCohortBuilder:
         self._is_drug_roll_up_concept = is_drug_roll_up_concept
         self._is_new_patient_representation = is_new_patient_representation
         self._gpt_patient_sequence = gpt_patient_sequence
-        self._is_hierarchical_bert = is_hierarchical_bert
         self._is_first_time_outcome = is_first_time_outcome
         self._is_remove_index_prediction_starts = is_remove_index_prediction_starts
         self._is_questionable_outcome_existed = is_questionable_outcome_existed
@@ -388,7 +387,6 @@ class NestedCohortBuilder:
             f"is_drug_roll_up_concept: {is_drug_roll_up_concept}\n"
             f"is_new_patient_representation: {is_new_patient_representation}\n"
             f"gpt_patient_sequence: {gpt_patient_sequence}\n"
-            f"is_hierarchical_bert: {is_hierarchical_bert}\n"
             f"is_first_time_outcome: {is_first_time_outcome}\n"
             f"is_questionable_outcome_existed: {is_questionable_outcome_existed}\n"
             f"is_remove_index_prediction_starts: {is_remove_index_prediction_starts}\n"
@@ -720,14 +718,6 @@ class NestedCohortBuilder:
             [F.col("ehr." + field_name) for field_name in ehr_records.schema.fieldNames()]
         )
 
-        if self._is_hierarchical_bert:
-            return create_hierarchical_sequence_data(
-                person=self._dependency_dict[PERSON],
-                visit_occurrence=self._dependency_dict[VISIT_OCCURRENCE],
-                patient_events=cohort_ehr_records,
-                allow_measurement_only=self._allow_measurement_only,
-            )
-
         if self._is_feature_concept_frequency:
             return create_concept_frequency_data(cohort_ehr_records, None)
 
@@ -868,7 +858,6 @@ def create_prediction_cohort(
         aggregate_by_hour=spark_args.aggregate_by_hour,
         is_new_patient_representation=spark_args.is_new_patient_representation,
         gpt_patient_sequence=spark_args.gpt_patient_sequence,
-        is_hierarchical_bert=spark_args.is_hierarchical_bert,
         classic_bert_seq=spark_args.classic_bert_seq,
         is_first_time_outcome=spark_args.is_first_time_outcome,
         # If the outcome negative query exists, that means we need to remove those questionable

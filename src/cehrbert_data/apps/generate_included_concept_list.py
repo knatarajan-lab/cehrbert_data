@@ -24,8 +24,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from cehrbert_data.config.output_names import QUALIFIED_CONCEPT_LIST_PATH
-from cehrbert_data.const.common import MEASUREMENT
-from cehrbert_data.utils.spark_utils import join_domain_tables, preprocess_domain_table
+from cehrbert_data.const.common import CONCEPT
+from cehrbert_data.utils.spark_utils import extract_events_by_domain, preprocess_domain_table
 
 DOMAIN_TABLE_LIST = ["condition_occurrence", "procedure_occurrence", "drug_exposure"]
 
@@ -55,32 +55,38 @@ def main(
     """
     spark = SparkSession.builder.appName("Generate concept list").getOrCreate()
 
-    domain_tables = []
     # Exclude measurement from domain_table_list if exists because we need to process measurement
     # in a different way
     domain_table_list = ehr_table_list if ehr_table_list else DOMAIN_TABLE_LIST
+    concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+    patient_ehr_events = None
     for domain_table_name in domain_table_list:
-        if domain_table_name != MEASUREMENT:
-            domain_tables.append(
-                preprocess_domain_table(
-                    spark,
-                    input_folder,
-                    domain_table_name,
-                    with_drug_rollup=with_drug_rollup,
-                )
-            )
-
-    # Union all domain table records
-    patient_events = join_domain_tables(domain_tables)
+        domain_table = preprocess_domain_table(
+            spark=spark,
+            input_folder=input_folder,
+            domain_table_name=domain_table_name,
+            with_drug_rollup=with_drug_rollup
+        )
+        ehr_events = extract_events_by_domain(
+            domain_table,
+            spark=spark,
+            concept=concept,
+            aggregate_by_hour=False,
+            refresh=False,
+            persistence_folder=input_folder
+        )
+        if patient_ehr_events is None:
+            patient_ehr_events = ehr_events
+        else:
+            patient_ehr_events = patient_ehr_events.unionByName(ehr_events)
 
     # Filter out concepts that are linked to less than 100 patients
     qualified_concepts = (
-        patient_events.where("visit_occurrence_id IS NOT NULL")
+        patient_ehr_events.where("visit_occurrence_id IS NOT NULL")
         .groupBy("standard_concept_id")
         .agg(F.countDistinct("person_id").alias("freq"))
         .where(F.col("freq") >= min_num_of_patients)
     )
-
     qualified_concepts.write.mode("overwrite").parquet(os.path.join(output_folder, QUALIFIED_CONCEPT_LIST_PATH))
 
 
