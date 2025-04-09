@@ -1024,7 +1024,7 @@ def get_measurement_events(
             CAST(NULL AS STRING) AS event_group_id,
             m.value_as_number AS number_as_value,
             CAST(m.value_as_concept_id AS STRING) AS concept_as_value,
-            COALESCE(c.concept_code, m.unit_source_value) AS unit
+            COALESCE(c.concept_code, m.unit_source_value, 'N/A') AS unit
         FROM measurement AS m
         LEFT JOIN concept AS c
             ON m.unit_concept_id = c.concept_id
@@ -1096,7 +1096,7 @@ def get_observation_events(
             CAST(NULL AS STRING) AS event_group_id,
             o.value_as_number AS number_as_value,
             CAST(o.value_as_concept_id AS STRING) AS concept_as_value,
-            COALESCE(c.concept_code, o.unit_source_value) AS unit
+            COALESCE(c.concept_code, o.unit_source_value, 'N/A') AS unit
         FROM observation AS o
         LEFT JOIN concept AS c
             ON o.unit_concept_id = c.concept_id
@@ -1166,7 +1166,7 @@ def get_device_events(
             CAST(NULL AS STRING) AS event_group_id,
             d.quantity AS number_as_value,
             CAST(NULL AS STRING) AS concept_as_value,
-            COALESCE(c.concept_code, d.unit_source_value) AS unit
+            COALESCE(c.concept_code, d.unit_source_value, 'N/A') AS unit
         FROM device_exposure AS d
         LEFT JOIN concept AS c
             ON d.unit_concept_id = c.concept_id
