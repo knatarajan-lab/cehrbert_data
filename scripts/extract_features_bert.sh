@@ -177,18 +177,11 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
         # Get the basename of the cohort directory to use as the cohort name
         COHORT_NAME=$(basename "$cohort_dir")
         
-        # Create a cohort-specific output directory
-        COHORT_OUTPUT_DIR="${OUTPUT_DIR}/${COHORT_NAME}"
-        if [ ! -d "$COHORT_OUTPUT_DIR" ]; then
-            echo "Creating cohort output directory: $COHORT_OUTPUT_DIR"
-            mkdir -p "$COHORT_OUTPUT_DIR"
-        fi
-        
         # Run the Python script with the directory-specific arguments
         if python -u -m cehrbert_data.tools.extract_features \
             -c "$COHORT_NAME" \
             -i "$INPUT_DIR" \
-            -o "$COHORT_OUTPUT_DIR" \
+            -o "$OUTPUT_DIR" \
             -dl 1985-01-01 \
             -du 2023-12-31 \
             --cohort_dir "$cohort_dir" \
