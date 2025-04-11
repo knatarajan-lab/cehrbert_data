@@ -197,8 +197,8 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             --label_column boolean_value \
             -ip \
             --gpt_patient_sequence \
-            --att_type cehr_bert \
-            --inpatient_att_type mix \
+            --att_type day \
+            --inpatient_att_type day \
             -iv \
             --ehr_table_list $EHR_TABLES \
             --patient_splits_folder "$PATIENT_SPLITS_FOLDER" \
