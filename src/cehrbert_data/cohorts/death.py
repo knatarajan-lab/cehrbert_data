@@ -17,6 +17,13 @@ last_visit_start_date AS
         MAX(visit_start_date) AS last_visit_start_date
     FROM global_temp.visit_occurrence
     GROUP BY person_id
+),
+dni AS (
+    SELECT
+        person_id,
+        observation_datetime
+    FROM global_temp.observation
+    WHERE observation_concept_id in (36712886, 4119499, 4275347)
 )
 
 SELECT
@@ -27,6 +34,12 @@ FROM max_death_date_cte AS d
 JOIN last_visit_start_date AS v
     ON d.person_id = v.person_id
         AND v.last_visit_start_date <= d.death_date
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dni
+    WHERE ON d.person_id = dni.person_id
+        AND dni.observation_datetime <= d.death_date 
+)
 """
 
 DEFAULT_COHORT_NAME = "mortality"
