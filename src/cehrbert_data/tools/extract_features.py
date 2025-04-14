@@ -63,6 +63,10 @@ def main(args):
     spark = SparkSession.builder.appName(
         f"Extract Features for existing cohort {args.cohort_name}"
     ).getOrCreate()
+    spark.conf.set(
+        "spark.sql.legacy.parquet.int96RebaseModeInWrite",
+        "CORRECTED"
+    )
 
     cohort_dir = os.path.expanduser(args.cohort_dir)
     is_parquet = False
