@@ -87,10 +87,10 @@ def main(args):
             csv(args.cohort_dir)
 
     cohort = cohort.withColumnRenamed(args.person_id_column, "person_id"). \
-            withColumnRenamed(args.index_date_column, "index_date"). \
-            withColumnRenamed(args.label_column, "label"). \
-            withColumn("index_date", f.col("index_date").cast(t.TimestampType())). \
-            select("person_id", "index_date", "label")
+        withColumnRenamed(args.index_date_column, "index_date"). \
+        withColumnRenamed(args.label_column, "label"). \
+        withColumn("index_date", f.col("index_date").cast(t.TimestampType())). \
+        select("person_id", "index_date", "label")
 
     if PredictionType.REGRESSION:
         cohort = cohort.withColumn("label", f.col("label").cast(t.FloatType()))
@@ -106,6 +106,19 @@ def main(args):
     )
     cohort.write.mode("overwrite").parquet(cohort_temp_folder)
     cohort = spark.read.parquet(cohort_temp_folder)
+
+    birthdate_udf = f.coalesce(
+        "birth_datetime",
+        f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
+    )
+
+    person = preprocess_domain_table(spark, args.input_folder, PERSON)
+    patient_demographic = person.select(
+        "person_id",
+        birthdate_udf.alias("birth_datetime"),
+        "race_concept_id",
+        "gender_concept_id",
+    )
 
     ehr_records = extract_ehr_records(
         spark,
@@ -128,27 +141,39 @@ def main(args):
         f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     ).where(ehr_records["datetime"] <= cohort["index_date"])
 
+    # For those patients who do not have a record before the index date, we need to manually add to keep the samples
+    # in the cohort
+    samples_no_ehr_records = cohort.select(
+        "person_id",
+        "cohort_member_id",
+        "index_date",
+        f.lit(0).alias("standard_concept_id"),
+        f.to_date("index_date").alias("date"),
+        f.expr(f"index_date - INTERVAL 1 SECOND").alias("datetime"),
+        f.lit(None).alias("visit_occurrence_id"),
+        f.lit("unknown").alias("domain"),
+        f.lit("N/A").alias("unit"),
+        f.lit(None).alias("number_as_value"),
+        f.lit(None).alias("concept_as_value"),
+        f.lit(None).alias("event_group_id"),
+        f.lit(0).alias("visit_concept_id"),
+    ).join(
+        patient_demographic.select("person_id", "birth_datetime"),
+        "person_id"
+    ).withColumn(
+        "age",
+        (f.datediff("datetime", "birth_datetime") / 365).cast(t.IntegerType()),
+    ).drop(
+        "birth_datetime"
+    )
+    ehr_records = ehr_records.unionByName(samples_no_ehr_records)
+
     if args.cache_events:
         ehr_records_temp_folder = os.path.join(
             args.output_folder, args.cohort_name, "ehr_records"
         )
         ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
         ehr_records = spark.read.parquet(ehr_records_temp_folder)
-
-
-    birthdate_udf = f.coalesce(
-        "birth_datetime",
-        f.concat("year_of_birth", f.lit("-01-01")).cast("timestamp"),
-    )
-
-    person = preprocess_domain_table(spark, args.input_folder, PERSON)
-    patient_demographic = person.select(
-        "person_id",
-        birthdate_udf.alias("birth_datetime"),
-        "race_concept_id",
-        "gender_concept_id",
-    )
-
 
     visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
 
@@ -157,7 +182,7 @@ def main(args):
             ehr_records,
             visit_occurrence=visit_occurrence,
             spark=spark,
-            persistence_folder = str(os.path.join(args.output_folder, args.cohort_name)),
+            persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
             duplicate_records=args.duplicate_records
         )
         # Update age if some of the ehr_records have been re-associated with the new visits
