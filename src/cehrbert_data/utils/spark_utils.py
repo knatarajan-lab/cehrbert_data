@@ -663,7 +663,8 @@ def construct_artificial_visits(
     # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
     updated_patient_events = patient_events.join(
         visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
-        "visit_occurrence_id"
+        "visit_occurrence_id",
+        "left_outer"
     ).withColumn(
         "visit_occurrence_id",
         F.when(
@@ -798,6 +799,7 @@ def extract_ehr_records(
         include_concept_list: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = False,
+        keep_orphan_records: bool = False,
 ):
     """
     Extract the ehr records for domain_table_list from input_folder.
@@ -811,6 +813,7 @@ def extract_ehr_records(
     :param include_concept_list:
     :param refresh_measurement:
     :param aggregate_by_hour:
+    :param keep_orphan_records:
     :return:
     """
     concept = preprocess_domain_table(spark, input_folder, CONCEPT)
@@ -843,7 +846,8 @@ def extract_ehr_records(
         )
         patient_ehr_records = patient_ehr_records.join(qualified_concepts, "standard_concept_id")
 
-    patient_ehr_records = patient_ehr_records.where(F.col("visit_occurrence_id").isNotNull()).distinct()
+    if not keep_orphan_records:
+        patient_ehr_records = patient_ehr_records.where(F.col("visit_occurrence_id").isNotNull()).distinct()
     person = preprocess_domain_table(spark, input_folder, PERSON)
     person = person.withColumn(
         "birth_datetime",

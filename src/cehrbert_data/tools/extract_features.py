@@ -117,6 +117,7 @@ def main(args):
         include_concept_list=args.include_concept_list,
         refresh_measurement=args.refresh_measurement,
         aggregate_by_hour=args.aggregate_by_hour,
+        keep_orphan_records=args.should_construct_artificial_visits,
     )
     # Drop index_date because create_sequence_data_with_att does not expect this column
     ehr_records = cohort.select("person_id", "cohort_member_id", "index_date").join(
