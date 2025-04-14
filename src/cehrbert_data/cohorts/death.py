@@ -1,5 +1,5 @@
 from cehrbert_data.cohorts.query_builder import QueryBuilder, QuerySpec, create_cohort_entry_query_spec
-from cehrbert_data.const.common import DEATH, PERSON, VISIT_OCCURRENCE
+from cehrbert_data.const.common import DEATH, PERSON, VISIT_OCCURRENCE, OBSERVATION
 
 DEATH_COHORT_QUERY = """
 WITH max_death_date_cte AS
@@ -18,7 +18,7 @@ last_visit_start_date AS
     FROM global_temp.visit_occurrence
     GROUP BY person_id
 ),
-dni AS (
+dnr AS (
     SELECT
         person_id,
         observation_datetime
@@ -36,14 +36,14 @@ JOIN last_visit_start_date AS v
         AND v.last_visit_start_date <= d.death_date
 WHERE NOT EXISTS (
     SELECT 1
-    FROM dni
-    WHERE ON d.person_id = dni.person_id
-        AND dni.observation_datetime <= d.death_date 
+    FROM dnr
+    WHERE d.person_id = dnr.person_id
+        AND dnr.observation_datetime <= d.death_date 
 )
 """
 
 DEFAULT_COHORT_NAME = "mortality"
-DEPENDENCY_LIST = [PERSON, DEATH, VISIT_OCCURRENCE]
+DEPENDENCY_LIST = [PERSON, DEATH, VISIT_OCCURRENCE, OBSERVATION]
 
 
 def query_builder():
