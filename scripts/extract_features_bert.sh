@@ -23,6 +23,7 @@ function display_help() {
     echo "  -p, --patient-splits-folder DIR   Specify the patient splits folder (default: \$PATIENT_SPLITS_FOLDER env variable)"
     echo "  -e, --ehr-tables LIST             Specify the EHR tables as a space-separated list in quotes"
     echo "                                    (default: \$EHR_TABLES env variable)"
+    echo "  -ov, --observation-window DAYS    Specify the observation window in days (default: 0)"
     echo ""
     echo "Environment Variables (used as defaults if parameters not provided):"
     echo "  COHORT_FOLDER                     Base directory for cohorts"
@@ -42,6 +43,7 @@ function display_help() {
 
 # Parse command line arguments
 VERBOSE=false
+OBSERVATION_WINDOW=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -h|--help)
@@ -70,6 +72,10 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         -e|--ehr-tables)
             EHR_TABLES="$2"
+            shift 2
+            ;;
+        -ov|--observation-window)
+            OBSERVATION_WINDOW="$2"
             shift 2
             ;;
         *)
@@ -123,6 +129,7 @@ if [ "$VERBOSE" = true ]; then
     echo "  OUTPUT_DIR: $OUTPUT_DIR"
     echo "  PATIENT_SPLITS_FOLDER: $PATIENT_SPLITS_FOLDER"
     echo "  EHR_TABLES: $EHR_TABLES"
+    echo "  Observation Window: $OBSERVATION_WINDOW days"
 fi
 
 # Check if required directories exist
@@ -166,17 +173,18 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
     if [ -d "$cohort_dir" ]; then
         COHORT_NAME=$(basename "$cohort_dir")
         echo "[$((PROCESSED+1))/$COHORT_COUNT] Processing cohort: $COHORT_NAME (output to $COHORT_OUTPUT_DIR)"
-        
+
         # Display verbose information if enabled
         if [ "$VERBOSE" = true ]; then
             echo "  Input directory: $INPUT_DIR"
             echo "  Output directory: $OUTPUT_DIR"
             echo "  Cohort directory: $cohort_dir"
+            echo "  Observation Window: $OBSERVATION_WINDOW days"
         fi
-        
+
         # Get the basename of the cohort directory to use as the cohort name
         COHORT_NAME=$(basename "$cohort_dir")
-        
+
         # Run the Python script with the directory-specific arguments
         if python -u -m cehrbert_data.tools.extract_features \
             -c "$COHORT_NAME" \
@@ -196,15 +204,16 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             --patient_splits_folder "$PATIENT_SPLITS_FOLDER" \
             --cache_events \
             --should_construct_artificial_visits \
-            --include_concept_list; then
-            
+            --include_concept_list \
+            --observation_window "$OBSERVATION_WINDOW"; then
+
             echo "✅ Successfully processed cohort: $COHORT_NAME"
             PROCESSED=$((PROCESSED+1))
         else
             echo "❌ Failed to process cohort: $COHORT_NAME"
             FAILED=$((FAILED+1))
         fi
-        
+
         echo "--------------------------------------"
     fi
 done
