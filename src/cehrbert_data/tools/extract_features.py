@@ -141,10 +141,21 @@ def main(args):
         f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
     ).where(ehr_records["datetime"] <= cohort["index_date"])
 
+    if args.cache_events:
+        ehr_records_temp_folder = os.path.join(
+            args.output_folder, args.cohort_name, "ehr_records"
+        )
+        ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
+        ehr_records = spark.read.parquet(ehr_records_temp_folder)
+
     # For those patients who do not have a record before the index date, we need to manually add to keep the samples
     # in the cohort
-    samples_no_ehr_records = cohort.where(
-        ~cohort["person_id"].isin(ehr_records.person_id)
+    samples_no_ehr_records = cohort.join(
+        ehr_records.select("cohort_member_id"),
+        "cohort_member_id",
+        "left_outer"
+    ).where(
+        ehr_records["cohort_member_id"].isNull()
     )
     samples_no_ehr_records = samples_no_ehr_records.select(
         "person_id",
@@ -152,13 +163,13 @@ def main(args):
         "index_date",
         f.lit(0).alias("standard_concept_id"),
         f.to_date("index_date").alias("date"),
-        f.expr(f"index_date - INTERVAL 1 SECOND").alias("datetime"),
-        f.lit(None).alias("visit_occurrence_id"),
+        f.expr(f"index_date - INTERVAL 1 DAY").alias("datetime"),
+        f.lit(None).cast(t.IntegerType()).alias("visit_occurrence_id"),
         f.lit("unknown").alias("domain"),
         f.lit("N/A").alias("unit"),
-        f.lit(None).alias("number_as_value"),
-        f.lit(None).alias("concept_as_value"),
-        f.lit(None).alias("event_group_id"),
+        f.lit(None).cast(t.FloatType()).alias("number_as_value"),
+        f.lit(None).cast(t.StringType()).alias("concept_as_value"),
+        f.lit(None).cast(t.StringType()).alias("event_group_id"),
         f.lit(0).alias("visit_concept_id"),
     ).join(
         patient_demographic.select("person_id", "birth_datetime"),
@@ -169,14 +180,15 @@ def main(args):
     ).drop(
         "birth_datetime"
     )
-    ehr_records = ehr_records.unionByName(samples_no_ehr_records)
 
     if args.cache_events:
-        ehr_records_temp_folder = os.path.join(
-            args.output_folder, args.cohort_name, "ehr_records"
+        samples_no_ehr_records_temp_folder = os.path.join(
+            args.output_folder, args.cohort_name, "samples_no_ehr_records"
         )
-        ehr_records.write.mode("overwrite").parquet(ehr_records_temp_folder)
-        ehr_records = spark.read.parquet(ehr_records_temp_folder)
+        samples_no_ehr_records.write.mode("overwrite").parquet(samples_no_ehr_records_temp_folder)
+        samples_no_ehr_records = spark.read.parquet(samples_no_ehr_records_temp_folder)
+
+    ehr_records = ehr_records.unionByName(samples_no_ehr_records)
 
     visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
 
