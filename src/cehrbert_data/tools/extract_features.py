@@ -186,7 +186,8 @@ def main(args):
             visit_occurrence=visit_occurrence,
             spark=spark,
             persistence_folder=str(os.path.join(args.output_folder, args.cohort_name)),
-            duplicate_records=args.duplicate_records
+            duplicate_records=args.duplicate_records,
+            disconnect_problem_list_records=args.disconnect_problem_list_records,
         )
         # Update age if some of the ehr_records have been re-associated with the new visits
         ehr_records = ehr_records.join(
