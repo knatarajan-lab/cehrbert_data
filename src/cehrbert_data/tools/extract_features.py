@@ -170,7 +170,7 @@ def main(args):
         f.lit(None).cast(t.FloatType()).alias("number_as_value"),
         f.lit(None).cast(t.StringType()).alias("concept_as_value"),
         f.lit(None).cast(t.StringType()).alias("event_group_id"),
-        f.lit(0).alias("visit_concept_id"),
+        f.lit(0).cast(t.IntegerType()).alias("visit_concept_id"),
     ).join(
         patient_demographic.select("person_id", "birth_datetime"),
         "person_id"

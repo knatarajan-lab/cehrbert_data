@@ -196,6 +196,7 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             --ehr_table_list $EHR_TABLES \
             --patient_splits_folder "$PATIENT_SPLITS_FOLDER" \
             --cache_events \
+            --should_construct_artificial_visits \
             --include_concept_list; then
             
             echo "✅ Successfully processed cohort: $COHORT_NAME"
