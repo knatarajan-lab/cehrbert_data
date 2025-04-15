@@ -143,7 +143,10 @@ def main(args):
 
     # For those patients who do not have a record before the index date, we need to manually add to keep the samples
     # in the cohort
-    samples_no_ehr_records = cohort.select(
+    samples_no_ehr_records = cohort.where(
+        ~cohort["person_id"].isin(ehr_records.person_id)
+    )
+    samples_no_ehr_records = samples_no_ehr_records.select(
         "person_id",
         "cohort_member_id",
         "index_date",
