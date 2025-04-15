@@ -139,7 +139,15 @@ def main(args):
     ).withColumn(
         "index_date",
         f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
-    ).where(ehr_records["datetime"] <= cohort["index_date"])
+    ).where(
+        ehr_records["datetime"] <= cohort["index_date"]
+    )
+
+    # We need to apply the observation window constraint when this parameter is provided
+    if args.observation_window > 0:
+        ehr_records = ehr_records.where(
+            ehr_records["datetime"] >= f.expr(f"index_date - INTERVAL {args.observation_window} DAYS")
+        )
 
     if args.cache_events:
         ehr_records_temp_folder = os.path.join(
