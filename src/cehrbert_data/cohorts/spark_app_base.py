@@ -319,6 +319,7 @@ class NestedCohortBuilder:
             cache_events: bool = False,
             should_construct_artificial_visits: bool = False,
             duplicate_records: bool = False,
+            disconnect_problem_list_records: bool = False,
     ):
         self._cohort_name = cohort_name
         self._input_folder = input_folder
@@ -366,6 +367,7 @@ class NestedCohortBuilder:
         self._cache_events = cache_events
         self._should_construct_artificial_visits = should_construct_artificial_visits
         self._duplicate_records = duplicate_records
+        self._disconnect_problem_list_records = disconnect_problem_list_records
 
         self.get_logger().info(
             f"cohort_name: {cohort_name}\n"
@@ -407,6 +409,7 @@ class NestedCohortBuilder:
             f"cache_events: {cache_events}\n"
             f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
             f"duplicate_records: {duplicate_records}\n"
+            f"disconnect_problem_list_records: {disconnect_problem_list_records}\n"
         )
 
         self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
@@ -626,6 +629,7 @@ class NestedCohortBuilder:
             include_concept_list=self._include_concept_list,
             refresh_measurement=self._refresh_measurement,
             aggregate_by_hour=self._aggregate_by_hour,
+            keep_orphan_records=self._should_construct_artificial_visits,
         )
 
         if self._cache_events:
@@ -652,7 +656,8 @@ class NestedCohortBuilder:
                 self._dependency_dict[VISIT_OCCURRENCE],
                 spark=self.spark if self._cache_events else None,
                 persistence_folder=self._output_data_folder if self._cache_events else None,
-                duplicate_records=self._duplicate_records
+                duplicate_records=self._duplicate_records,
+                disconnect_problem_list_records=self._disconnect_problem_list_records,
             )
 
             # Update age if some of the ehr_records have been re-associated with the new visits
