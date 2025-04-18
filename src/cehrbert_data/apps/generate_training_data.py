@@ -50,7 +50,8 @@ def main(
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = True,
         should_construct_artificial_visits: bool = False,
-        duplicate_records: bool = False
+        duplicate_records: bool = False,
+        disconnect_problem_list_records: bool = False,
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
@@ -77,6 +78,7 @@ def main(
         f"aggregate_by_hour: {aggregate_by_hour}\n"
         f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
         f"duplicate_records: {duplicate_records}\n"
+        f"disconnect_problem_list_records: {disconnect_problem_list_records}\n"
     )
 
     concept = preprocess_domain_table(spark, input_folder, CONCEPT)
@@ -161,7 +163,8 @@ def main(
             visit_occurrence_person,
             spark=spark,
             persistence_folder=output_folder,
-            duplicate_records=duplicate_records
+            duplicate_records=duplicate_records,
+            disconnect_problem_list_records=disconnect_problem_list_records
         )
         # Update age if some of the ehr_records have been re-associated with the new visits
         patient_ehr_events = patient_ehr_events.join(
@@ -361,6 +364,12 @@ def create_argparser():
         action="store_true",
         help="Indicate whether we want to duplicate the problem list records when constructing artificial visits"
     )
+    parser.add_argument(
+        '--disconnect_problem_list_records',
+        dest="disconnect_problem_list_records",
+        action="store_true",
+        help="Indicate whether we want to disconnect the problem list records when constructing artificial visits"
+    )
     return parser
 
 
@@ -394,5 +403,6 @@ if __name__ == "__main__":
         refresh_measurement=ARGS.refresh_measurement,
         aggregate_by_hour=ARGS.aggregate_by_hour,
         should_construct_artificial_visits=ARGS.should_construct_artificial_visits,
-        duplicate_records=ARGS.duplicate_records
+        duplicate_records=ARGS.duplicate_records,
+        disconnect_problem_list_records=ARGS.disconnect_problem_list_records
     )

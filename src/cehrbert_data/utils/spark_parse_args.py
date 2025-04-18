@@ -413,13 +413,18 @@ def create_spark_args(parse: bool = True):
         "--should_construct_artificial_visits",
         dest="should_construct_artificial_visits",
         action="store_true",
-        help="Indicate whether we should construct artificial visits for "
-             "the problem list records that could occur years ahead",
+        help="Indicate whether we should construct artificial visits for orphan records (not connected to a visit_id)"
     )
     parser.add_argument(
         "--duplicate_records",
         dest="duplicate_records",
         action="store_true",
         help="Indicate whether we want to duplicate the problem list records when constructing artificial visits"
+    )
+    parser.add_argument(
+        '--disconnect_problem_list_records',
+        dest="disconnect_problem_list_records",
+        action="store_true",
+        help="Indicate whether we want to disconnect the problem list records when constructing artificial visits"
     )
     return parser.parse_args() if parse else parser
