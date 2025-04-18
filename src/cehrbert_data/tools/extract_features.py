@@ -53,6 +53,10 @@ def create_feature_extraction_args():
         required=False,
         default=PredictionType.BINARY
     )
+    spark_args.add_argument(
+        '--keep_samples_with_no_features',
+        action="store_true",
+    )
     return spark_args.parse_args()
 
 
@@ -158,45 +162,46 @@ def main(args):
 
     # For those patients who do not have a record before the index date, we need to manually add to keep the samples
     # in the cohort
-    samples_no_ehr_records = cohort.join(
-        ehr_records.select("cohort_member_id"),
-        "cohort_member_id",
-        "left_outer"
-    ).where(
-        ehr_records["cohort_member_id"].isNull()
-    )
-    samples_no_ehr_records = samples_no_ehr_records.select(
-        "person_id",
-        "cohort_member_id",
-        "index_date",
-        f.lit(0).alias("standard_concept_id"),
-        f.to_date("index_date").alias("date"),
-        f.expr(f"index_date - INTERVAL 1 DAY").alias("datetime"),
-        f.lit(None).cast(t.IntegerType()).alias("visit_occurrence_id"),
-        f.lit("unknown").alias("domain"),
-        f.lit("N/A").alias("unit"),
-        f.lit(None).cast(t.FloatType()).alias("number_as_value"),
-        f.lit(None).cast(t.StringType()).alias("concept_as_value"),
-        f.lit(None).cast(t.StringType()).alias("event_group_id"),
-        f.lit(0).cast(t.IntegerType()).alias("visit_concept_id"),
-    ).join(
-        patient_demographic.select("person_id", "birth_datetime"),
-        "person_id"
-    ).withColumn(
-        "age",
-        (f.datediff("datetime", "birth_datetime") / 365).cast(t.IntegerType()),
-    ).drop(
-        "birth_datetime"
-    )
-
-    if args.cache_events:
-        samples_no_ehr_records_temp_folder = os.path.join(
-            args.output_folder, args.cohort_name, "samples_no_ehr_records"
+    if args.keep_samples_with_no_features:
+        samples_no_ehr_records = cohort.join(
+            ehr_records.select("cohort_member_id"),
+            "cohort_member_id",
+            "left_outer"
+        ).where(
+            ehr_records["cohort_member_id"].isNull()
         )
-        samples_no_ehr_records.write.mode("overwrite").parquet(samples_no_ehr_records_temp_folder)
-        samples_no_ehr_records = spark.read.parquet(samples_no_ehr_records_temp_folder)
+        samples_no_ehr_records = samples_no_ehr_records.select(
+            "person_id",
+            "cohort_member_id",
+            "index_date",
+            f.lit(0).alias("standard_concept_id"),
+            f.to_date("index_date").alias("date"),
+            f.expr(f"index_date - INTERVAL 1 DAY").alias("datetime"),
+            f.lit(None).cast(t.IntegerType()).alias("visit_occurrence_id"),
+            f.lit("unknown").alias("domain"),
+            f.lit("N/A").alias("unit"),
+            f.lit(None).cast(t.FloatType()).alias("number_as_value"),
+            f.lit(None).cast(t.StringType()).alias("concept_as_value"),
+            f.lit(None).cast(t.StringType()).alias("event_group_id"),
+            f.lit(0).cast(t.IntegerType()).alias("visit_concept_id"),
+        ).join(
+            patient_demographic.select("person_id", "birth_datetime"),
+            "person_id"
+        ).withColumn(
+            "age",
+            (f.datediff("datetime", "birth_datetime") / 365).cast(t.IntegerType()),
+        ).drop(
+            "birth_datetime"
+        )
 
-    ehr_records = ehr_records.unionByName(samples_no_ehr_records)
+        if args.cache_events:
+            samples_no_ehr_records_temp_folder = os.path.join(
+                args.output_folder, args.cohort_name, "samples_no_ehr_records"
+            )
+            samples_no_ehr_records.write.mode("overwrite").parquet(samples_no_ehr_records_temp_folder)
+            samples_no_ehr_records = spark.read.parquet(samples_no_ehr_records_temp_folder)
+
+        ehr_records = ehr_records.unionByName(samples_no_ehr_records)
 
     visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
 
