@@ -205,6 +205,7 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             --cache_events \
             --should_construct_artificial_visits \
             --include_concept_list \
+            --keep_samples_with_no_features \
             --observation_window "$OBSERVATION_WINDOW"; then
 
             echo "✅ Successfully processed cohort: $COHORT_NAME"
