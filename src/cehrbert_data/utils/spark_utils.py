@@ -202,6 +202,8 @@ def extract_events_by_domain(
                 persistence_folder=persistence_folder,
                 aggregate_by_hour=aggregate_by_hour
             )
+            # Filter out the zero concept numeric events
+            domain_records = domain_records.where(F.col("standard_concept_id") != "0")
         else:
             # Remove records that don't have a date or standard_concept_id
             domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
