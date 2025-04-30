@@ -202,6 +202,8 @@ def extract_events_by_domain(
                 persistence_folder=persistence_folder,
                 aggregate_by_hour=aggregate_by_hour
             )
+            # Filter out the zero concept numeric events
+            domain_records = domain_records.where(F.col("standard_concept_id") != "0")
         else:
             # Remove records that don't have a date or standard_concept_id
             domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
@@ -480,7 +482,7 @@ def create_sequence_data_with_att(
             persistence_folder=persistence_folder
         ),
         DeathEventDecorator(death, att_type, spark=spark, persistence_folder=persistence_folder),
-        PredictionEventDecorator(cohort_index, spark=spark, persistence_folder=persistence_folder),
+        # PredictionEventDecorator(cohort_index, spark=spark, persistence_folder=persistence_folder),
     ]
 
     if not exclude_demographic:
@@ -635,7 +637,8 @@ def construct_artificial_visits(
         visit_occurrence: DataFrame,
         spark: SparkSession = None,
         persistence_folder: str = None,
-        duplicate_records: bool = False
+        duplicate_records: bool = False,
+        disconnect_problem_list_records: bool = False,
 ) -> Tuple[DataFrame, DataFrame]:
     """
     Fix visit_occurrence_id of
@@ -645,8 +648,10 @@ def construct_artificial_visits(
     :param spark:
     :param persistence_folder:
     :param duplicate_records:
+    :param disconnect_problem_list_records:
     :return:
     """
+
     visit = visit_occurrence.select(
         F.col("person_id"),
         F.col("visit_occurrence_id"),
@@ -660,34 +665,36 @@ def construct_artificial_visits(
         "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 2 DAYS")
     )
 
-    # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
-    updated_patient_events = patient_events.join(
-        visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
-        "visit_occurrence_id"
-    ).withColumn(
-        "visit_occurrence_id",
-        F.when(
-            F.col("datetime").between(F.col("visit_start_lower_bound"), F.col("visit_end_upper_bound")),
-            F.col("visit_occurrence_id")
-        ).otherwise(
-            F.lit(None).cast(T.IntegerType())
+    if disconnect_problem_list_records:
+        # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
+        updated_patient_events = patient_events.join(
+            visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
+            "visit_occurrence_id",
+            "left_outer"
+        ).withColumn(
+            "visit_occurrence_id",
+            F.when(
+                F.col("datetime").between(F.col("visit_start_lower_bound"), F.col("visit_end_upper_bound")),
+                F.col("visit_occurrence_id")
+            ).otherwise(
+                F.lit(None).cast(T.IntegerType())
+            )
+        ).withColumn(
+            "visit_concept_id",
+            F.when(
+                F.col("visit_occurrence_id").isNotNull(),
+                F.col("visit_concept_id")
+            ).otherwise(
+                F.lit(0).cast(T.IntegerType())
+            )
+        ).drop(
+            "visit_start_lower_bound", "visit_end_upper_bound"
         )
-    ).withColumn(
-        "visit_concept_id",
-        F.when(
-            F.col("visit_occurrence_id").isNotNull(),
-            F.col("visit_concept_id")
-        ).otherwise(
-            F.lit(0).cast(T.IntegerType())
-        )
-    ).drop(
-        "visit_start_lower_bound", "visit_end_upper_bound"
-    )
 
-    if duplicate_records:
-        patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
-    else:
-        patient_events = updated_patient_events
+        if duplicate_records:
+            patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
+        else:
+            patient_events = updated_patient_events
 
     # Try to connect to the existing visit
     events_to_fix = patient_events.where(
@@ -798,6 +805,7 @@ def extract_ehr_records(
         include_concept_list: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = False,
+        keep_orphan_records: bool = False,
 ):
     """
     Extract the ehr records for domain_table_list from input_folder.
@@ -811,6 +819,7 @@ def extract_ehr_records(
     :param include_concept_list:
     :param refresh_measurement:
     :param aggregate_by_hour:
+    :param keep_orphan_records:
     :return:
     """
     concept = preprocess_domain_table(spark, input_folder, CONCEPT)
@@ -843,7 +852,8 @@ def extract_ehr_records(
         )
         patient_ehr_records = patient_ehr_records.join(qualified_concepts, "standard_concept_id")
 
-    patient_ehr_records = patient_ehr_records.where(F.col("visit_occurrence_id").isNotNull()).distinct()
+    if not keep_orphan_records:
+        patient_ehr_records = patient_ehr_records.where(F.col("visit_occurrence_id").isNotNull()).distinct()
     person = preprocess_domain_table(spark, input_folder, PERSON)
     person = person.withColumn(
         "birth_datetime",

@@ -44,7 +44,7 @@ class PredictionEventDecorator(PatientEventDecorator):
             F.lit(F.current_date()).alias("date"),
             F.lit(F.current_date()).alias("visit_start_date"),
             F.lit(F.current_timestamp()).alias("visit_start_datetime"),
-            F.lit(0).alias("visit_concept_id"),
+            F.lit(0).cast(T.IntegerType()).alias("visit_concept_id"),
             F.lit("prediction_token").alias("domain"),
             F.lit(0.0).alias("number_as_value"),
             F.lit("0").alias("concept_as_value"),
