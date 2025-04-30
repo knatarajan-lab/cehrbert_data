@@ -142,7 +142,7 @@ def main(args):
         "person_id"
     ).withColumn(
         "index_date",
-        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS + INTERVAL 0.1 SECOND")
+        f.expr(f"index_date - INTERVAL {args.hold_off_window} DAYS")
     ).where(
         ehr_records["datetime"] <= cohort["index_date"]
     )
