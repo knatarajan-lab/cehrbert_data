@@ -713,7 +713,10 @@ def construct_artificial_visits(
     events_to_fix_with_visit = events_to_fix.drop("visit_occurrence_id").alias("event").join(
         visit.alias("visit"),
         (F.col("event.person_id") == F.col("visit.person_id"))
-        & F.col("event.datetime").between(F.col("visit.visit_start_datetime"), F.col("visit.visit_end_datetime")),
+        & F.col("event.datetime").between(
+            F.col("visit.visit_start_datetime").cast(T.DateType()).cast(T.TimestampType()),
+            F.expr("visit.visit_end_datetime + INTERVAL 1 DAY - INTERVAL 1 SECOND")
+        ),
         "left_outer"
     ).withColumn(
         "matching_rank",
