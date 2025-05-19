@@ -24,6 +24,7 @@ function display_help() {
     echo "  -e, --ehr-tables LIST             Specify the EHR tables as a space-separated list in quotes"
     echo "                                    (default: \$EHR_TABLES env variable)"
     echo "  -ov, --observation-window DAYS    Specify the observation window in days (default: 0)"
+    echo "  -dp, --disconnect_problem_list_records  Disconnect problem list records"
     echo ""
     echo "Environment Variables (used as defaults if parameters not provided):"
     echo "  COHORT_FOLDER                     Base directory for cohorts"
@@ -44,6 +45,7 @@ function display_help() {
 # Parse command line arguments
 VERBOSE=false
 OBSERVATION_WINDOW=0
+DISCONNECT_PROBLEM_LIST=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -h|--help)
@@ -77,6 +79,10 @@ while [[ "$#" -gt 0 ]]; do
         -ov|--observation-window)
             OBSERVATION_WINDOW="$2"
             shift 2
+            ;;
+        -dp|--disconnect_problem_list_records)
+            DISCONNECT_PROBLEM_LIST=true
+            shift
             ;;
         *)
             echo "Error: Unknown parameter: $1"
@@ -130,6 +136,7 @@ if [ "$VERBOSE" = true ]; then
     echo "  PATIENT_SPLITS_FOLDER: $PATIENT_SPLITS_FOLDER"
     echo "  EHR_TABLES: $EHR_TABLES"
     echo "  Observation Window: $OBSERVATION_WINDOW days"
+    echo "  Disconnect Problem List Records: $DISCONNECT_PROBLEM_LIST"
 fi
 
 # Check if required directories exist
@@ -172,7 +179,7 @@ FAILED=0
 for cohort_dir in "$COHORT_FOLDER"/*; do
     if [ -d "$cohort_dir" ]; then
         COHORT_NAME=$(basename "$cohort_dir")
-        echo "[$((PROCESSED+1))/$COHORT_COUNT] Processing cohort: $COHORT_NAME (output to $COHORT_OUTPUT_DIR)"
+        echo "[$((PROCESSED+1))/$COHORT_COUNT] Processing cohort: $COHORT_NAME (output to $OUTPUT_DIR)"
 
         # Display verbose information if enabled
         if [ "$VERBOSE" = true ]; then
@@ -180,19 +187,17 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             echo "  Output directory: $OUTPUT_DIR"
             echo "  Cohort directory: $cohort_dir"
             echo "  Observation Window: $OBSERVATION_WINDOW days"
+            echo "  Disconnect Problem List Records: $DISCONNECT_PROBLEM_LIST"
         fi
 
-        # Get the basename of the cohort directory to use as the cohort name
-        COHORT_NAME=$(basename "$cohort_dir")
-
-        # Run the Python script with the directory-specific arguments
-        if python -u -m cehrbert_data.tools.extract_features \
-            -c "$COHORT_NAME" \
-            -i "$INPUT_DIR" \
-            -o "$OUTPUT_DIR" \
+        # Build the Python command
+        PYTHON_CMD="python -u -m cehrbert_data.tools.extract_features \
+            -c \"$COHORT_NAME\" \
+            -i \"$INPUT_DIR\" \
+            -o \"$OUTPUT_DIR\" \
             -dl 1985-01-01 \
             -du 2023-12-31 \
-            --cohort_dir "$cohort_dir" \
+            --cohort_dir \"$cohort_dir\" \
             --person_id_column subject_id \
             --index_date_column prediction_time \
             --label_column boolean_value \
@@ -201,13 +206,20 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             --inpatient_att_type mix \
             -iv \
             --ehr_table_list $EHR_TABLES \
-            --patient_splits_folder "$PATIENT_SPLITS_FOLDER" \
+            --patient_splits_folder \"$PATIENT_SPLITS_FOLDER\" \
             --cache_events \
             --should_construct_artificial_visits \
             --include_concept_list \
             --keep_samples_with_no_features \
-            --observation_window "$OBSERVATION_WINDOW"; then
+            --observation_window \"$OBSERVATION_WINDOW\""
 
+        # Add the disconnect_problem_list_records flag if enabled
+        if [ "$DISCONNECT_PROBLEM_LIST" = true ]; then
+            PYTHON_CMD="$PYTHON_CMD --disconnect_problem_list_records"
+        fi
+
+        # Run the Python script with the directory-specific arguments
+        if eval $PYTHON_CMD; then
             echo "✅ Successfully processed cohort: $COHORT_NAME"
             PROCESSED=$((PROCESSED+1))
         else
