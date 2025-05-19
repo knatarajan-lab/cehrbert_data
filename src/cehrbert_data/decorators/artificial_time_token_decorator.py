@@ -3,7 +3,11 @@ import os.path
 from pyspark.sql import SparkSession, DataFrame, functions as F, types as T, Window as W
 
 from ..const.common import NA
-from ..const.artificial_tokens import VS_TOKEN, VE_TOKEN
+from ..const.artificial_tokens import (
+    VS_TOKEN,
+    VE_TOKEN,
+    VISIT_UNKNOWN_TOKEN
+)
 from .patient_event_decorator_base import (
     PatientEventDecorator, AttType, get_att_function
 )
@@ -189,9 +193,16 @@ class AttEventDecorator(PatientEventDecorator):
             artificial_tokens = visit_start_events.unionByName(att_tokens).unionByName(visit_end_events)
 
         if self._include_visit_type:
+            # make sure we don't insert 0 as the visit_type because 0 could be used in other contexts
+            visit_type_token_expr = F.when(
+                F.col("visit_concept_id").cast("string") == "0",
+                F.lit(VISIT_UNKNOWN_TOKEN)
+            ).otherwise(
+                F.col("visit_concept_id")
+            )
             # insert visit type after the VS token
             visit_type_tokens = (
-                visits.withColumn("standard_concept_id", F.col("visit_concept_id"))
+                visits.withColumn("standard_concept_id", visit_type_token_expr)
                 .withColumn("datetime", F.to_timestamp("date"))
                 .withColumn("visit_concept_order", F.col("min_visit_concept_order"))
                 .withColumn("concept_order", F.lit(0))
@@ -201,7 +212,6 @@ class AttEventDecorator(PatientEventDecorator):
                 .drop("min_visit_concept_order", "max_visit_concept_order")
                 .drop("min_concept_order", "max_concept_order")
             )
-
             artificial_tokens = artificial_tokens.unionByName(visit_type_tokens)
 
         artificial_tokens = artificial_tokens.drop("visit_end_date")

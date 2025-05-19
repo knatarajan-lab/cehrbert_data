@@ -10,6 +10,10 @@ from .token_priority import (
     GENDER_TOKEN_PRIORITY,
     RACE_TOKEN_PRIORITY
 )
+from cehrbert_data.const.artificial_tokens import (
+    RACE_UNKNOWN_TOKEN,
+    GENDER_UNKNOWN_TOKEN
+)
 
 
 class DemographicEventDecorator(PatientEventDecorator):
@@ -107,10 +111,16 @@ class DemographicEventDecorator(PatientEventDecorator):
             sequence_age_token, os.path.join(self.get_name(), "sequence_age_tokens")
         )
 
+        gender_token_expr = F.when(
+            F.coalesce(F.col("gender_concept_id"), F.lit(0)) != 0,
+            F.col("gender_concept_id").cast(T.StringType())
+        ).otherwise(
+            F.lit(GENDER_UNKNOWN_TOKEN)
+        )
         sequence_gender_token = (
             self._patient_demographic.select(F.col("person_id"), F.col("gender_concept_id"))
             .join(sequence_start_year_token, "person_id")
-            .withColumn("standard_concept_id", F.coalesce(F.col("gender_concept_id"), F.lit(0)).cast(T.StringType()))
+            .withColumn("standard_concept_id", gender_token_expr)
             .withColumn("priority", F.lit(GENDER_TOKEN_PRIORITY))
             .drop("gender_concept_id")
         )
@@ -120,10 +130,16 @@ class DemographicEventDecorator(PatientEventDecorator):
             sequence_gender_token, os.path.join(self.get_name(), "sequence_gender_tokens")
         )
 
+        race_token_expr = F.when(
+            F.coalesce(F.col("race_concept_id"), F.lit(0)) != 0,
+            F.col("race_concept_id").cast(T.StringType())
+        ).otherwise(
+            F.lit(RACE_UNKNOWN_TOKEN)
+        )
         sequence_race_token = (
             self._patient_demographic.select(F.col("person_id"), F.col("race_concept_id"))
             .join(sequence_start_year_token, "person_id")
-            .withColumn("standard_concept_id", F.coalesce(F.col("race_concept_id"), F.lit(0)).cast(T.StringType()))
+            .withColumn("standard_concept_id", race_token_expr)
             .withColumn("priority", F.lit(RACE_TOKEN_PRIORITY))
             .drop("race_concept_id")
         )
