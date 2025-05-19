@@ -198,7 +198,7 @@ class AttEventDecorator(PatientEventDecorator):
                 F.col("visit_concept_id").cast("string") == "0",
                 F.lit(VISIT_UNKNOWN_TOKEN)
             ).otherwise(
-                F.col("visit_concept_id")
+                F.col("visit_concept_id").cast("string")
             )
             # insert visit type after the VS token
             visit_type_tokens = (
