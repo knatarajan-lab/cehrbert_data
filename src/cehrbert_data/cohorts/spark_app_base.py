@@ -885,4 +885,5 @@ def create_prediction_cohort(
         cache_events=spark_args.cache_events,
         should_construct_artificial_visits=spark_args.should_construct_artificial_visits,
         duplicate_records=spark_args.duplicate_records,
+        disconnect_problem_list_records=spark_args.disconnect_problem_list_records,
     ).build()
