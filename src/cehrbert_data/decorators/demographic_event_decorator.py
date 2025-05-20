@@ -58,8 +58,6 @@ class DemographicEventDecorator(PatientEventDecorator):
             .withColumn("is_numeric_type", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .withColumn("datetime", F.lit("1920-01-01").cast(T.TimestampType()))
-            .withColumn("date", F.lit("1920-01-01").cast(T.DateType()))
             .where("token_order = 1")
             .drop("token_order")
         )
