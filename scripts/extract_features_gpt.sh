@@ -25,6 +25,7 @@ function display_help() {
     echo "                                    (default: \$EHR_TABLES env variable)"
     echo "  -ov, --observation-window DAYS    Specify the observation window in days (default: 0)"
     echo "  -dp, --disconnect_problem_list_records  Disconnect problem list records"
+    echo "  -ih, --include_inpatient_hour_token     Include inpatient hour token in the extracted features"
     echo ""
     echo "Environment Variables (used as defaults if parameters not provided):"
     echo "  COHORT_FOLDER                     Base directory for cohorts"
@@ -46,6 +47,7 @@ function display_help() {
 VERBOSE=false
 OBSERVATION_WINDOW=0
 DISCONNECT_PROBLEM_LIST=false
+INCLUDE_INPATIENT_HOUR_TOKEN=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -h|--help)
@@ -82,6 +84,10 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         -dp|--disconnect_problem_list_records)
             DISCONNECT_PROBLEM_LIST=true
+            shift
+            ;;
+        -ih|--include_inpatient_hour_token)
+            INCLUDE_INPATIENT_HOUR_TOKEN=true
             shift
             ;;
         *)
@@ -137,6 +143,7 @@ if [ "$VERBOSE" = true ]; then
     echo "  EHR_TABLES: $EHR_TABLES"
     echo "  Observation Window: $OBSERVATION_WINDOW days"
     echo "  Disconnect Problem List Records: $DISCONNECT_PROBLEM_LIST"
+    echo "  Include Inpatient Hour Token: $INCLUDE_INPATIENT_HOUR_TOKEN"
 fi
 
 # Check if required directories exist
@@ -188,6 +195,7 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
             echo "  Cohort directory: $cohort_dir"
             echo "  Observation Window: $OBSERVATION_WINDOW days"
             echo "  Disconnect Problem List Records: $DISCONNECT_PROBLEM_LIST"
+            echo "  Include Inpatient Hour Token: $INCLUDE_INPATIENT_HOUR_TOKEN"
         fi
 
         # Build the Python command
@@ -217,6 +225,11 @@ for cohort_dir in "$COHORT_FOLDER"/*; do
         # Add the disconnect_problem_list_records flag if enabled
         if [ "$DISCONNECT_PROBLEM_LIST" = true ]; then
             PYTHON_CMD="$PYTHON_CMD --disconnect_problem_list_records"
+        fi
+
+        # Add the include_inpatient_hour_token flag if enabled
+        if [ "$INCLUDE_INPATIENT_HOUR_TOKEN" = true ]; then
+            PYTHON_CMD="$PYTHON_CMD --include_inpatient_hour_token"
         fi
 
         # Run the Python script with the directory-specific arguments
