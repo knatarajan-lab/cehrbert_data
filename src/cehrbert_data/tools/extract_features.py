@@ -225,10 +225,7 @@ def main(args):
             f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
         ).drop("visit_start_date", "birth_datetime")
 
-    cohort_visit_occurrence = visit_occurrence.join(
-        cohort.select("person_id", "cohort_member_id", "index_date"),
-        "person_id"
-    ).withColumn(
+    visit_occurrence = visit_occurrence.withColumn(
         "visit_start_date",
         f.col("visit_start_date").cast(t.DateType())
     ).withColumn(
@@ -248,7 +245,7 @@ def main(args):
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
-        cohort_visit_occurrence
+        visit_occurrence
         .join(patient_demographic, "person_id")
         .withColumn("age", age_udf)
         .drop("birth_datetime")
