@@ -174,7 +174,7 @@ def main(args):
             "person_id",
             "cohort_member_id",
             "index_date",
-            f.lit(0).alias("standard_concept_id"),
+            f.lit("concept/0").alias("standard_concept_id"),
             f.to_date("index_date").alias("date"),
             f.expr(f"index_date - INTERVAL 1 DAY").alias("datetime"),
             f.lit(None).cast(t.IntegerType()).alias("visit_occurrence_id"),
