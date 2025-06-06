@@ -469,6 +469,32 @@ def create_sequence_data_with_att(
     if date_filter:
         patient_events = patient_events.where(F.col("date").cast("date") >= date_filter)
 
+    if cohort_index is not None:
+        if "cohort_member_id" in visit_occurrence.columns:
+            joined_expr = ["person_id", "cohort_member_id"]
+        else:
+            joined_expr = ["person_id"]
+
+        # There could be outpatient visits, where the visit_start_date occurs
+        visit_start_datetime_udf = F.when(
+            F.col("visit_start_datetime") > F.col("index_date"),
+            F.expr(f"index_date - INTERVAL {1} DAY")
+        ).otherwise(
+            F.col("visit_start_datetime")
+        )
+        # Remove the visits that are not used in the patient events
+        visit_occurrence = visit_occurrence.join(
+            patient_events.select("visit_occurrence_id").distinct(),
+            "visit_occurrence_id"
+        ).join(
+            cohort_index,
+            joined_expr
+        ).withColumn(
+            "visit_start_datetime", visit_start_datetime_udf
+        ).withColumn(
+            "visit_start_date", F.to_date("visit_start_datetime")
+        )
+
     decorators = [
         ClinicalEventDecorator(visit_occurrence, spark=spark, persistence_folder=persistence_folder),
         AttEventDecorator(
@@ -660,9 +686,9 @@ def construct_artificial_visits(
         F.coalesce("visit_end_datetime", F.to_timestamp(F.date_add(F.col("visit_end_date"), 1))).alias(
             "visit_end_datetime"),
     ).withColumn(
-        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 2 DAYS")
+        "visit_start_lower_bound", F.expr("visit_start_datetime - INTERVAL 1 DAYS")
     ).withColumn(
-        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 2 DAYS")
+        "visit_end_upper_bound", F.expr("visit_end_datetime + INTERVAL 1 DAYS")
     )
 
     if disconnect_problem_list_records:
