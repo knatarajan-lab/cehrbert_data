@@ -203,7 +203,16 @@ def main(args):
 
         ehr_records = ehr_records.unionByName(samples_no_ehr_records)
 
-    visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
+    visit_occurrence = preprocess_domain_table(
+        spark, args.input_folder, VISIT_OCCURRENCE
+    )
+    # EHR-SHOT dataset specific rule
+    visit_occurrence = visit_occurrence.withColumn("visit_concept_id", f.when(
+        f.col("visit_concept_id") == 1,
+        0
+    ).otherwise(
+        f.col("visit_concept_id")
+    ))
 
     if args.should_construct_artificial_visits:
         ehr_records, visit_occurrence = construct_artificial_visits(
