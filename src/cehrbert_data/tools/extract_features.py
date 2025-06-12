@@ -174,7 +174,7 @@ def main(args):
             "person_id",
             "cohort_member_id",
             "index_date",
-            f.lit(0).alias("standard_concept_id"),
+            f.lit("concept/0").alias("standard_concept_id"),
             f.to_date("index_date").alias("date"),
             f.expr(f"index_date - INTERVAL 1 DAY").alias("datetime"),
             f.lit(None).cast(t.IntegerType()).alias("visit_occurrence_id"),
@@ -203,7 +203,16 @@ def main(args):
 
         ehr_records = ehr_records.unionByName(samples_no_ehr_records)
 
-    visit_occurrence = preprocess_domain_table(spark, args.input_folder, VISIT_OCCURRENCE)
+    visit_occurrence = preprocess_domain_table(
+        spark, args.input_folder, VISIT_OCCURRENCE
+    )
+    # EHR-SHOT dataset specific rule
+    visit_occurrence = visit_occurrence.withColumn("visit_concept_id", f.when(
+        f.col("visit_concept_id") == 1,
+        0
+    ).otherwise(
+        f.col("visit_concept_id")
+    ))
 
     if args.should_construct_artificial_visits:
         ehr_records, visit_occurrence = construct_artificial_visits(
@@ -225,10 +234,7 @@ def main(args):
             f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
         ).drop("visit_start_date", "birth_datetime")
 
-    cohort_visit_occurrence = visit_occurrence.join(
-        cohort.select("person_id", "cohort_member_id", "index_date"),
-        "person_id"
-    ).withColumn(
+    visit_occurrence = visit_occurrence.withColumn(
         "visit_start_date",
         f.col("visit_start_date").cast(t.DateType())
     ).withColumn(
@@ -248,7 +254,7 @@ def main(args):
 
     age_udf = f.ceil(f.months_between(f.col("visit_start_date"), f.col("birth_datetime")) / f.lit(12))
     visit_occurrence_person = (
-        cohort_visit_occurrence
+        visit_occurrence
         .join(patient_demographic, "person_id")
         .withColumn("age", age_udf)
         .drop("birth_datetime")

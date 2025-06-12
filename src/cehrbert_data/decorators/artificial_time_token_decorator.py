@@ -6,7 +6,8 @@ from ..const.common import NA
 from ..const.artificial_tokens import (
     VS_TOKEN,
     VE_TOKEN,
-    VISIT_UNKNOWN_TOKEN
+    VISIT_UNKNOWN_TOKEN,
+    DISCHARGE_UNKNOWN_TOKEN
 )
 from .patient_event_decorator_base import (
     PatientEventDecorator, AttType, get_att_function
@@ -259,7 +260,7 @@ class AttEventDecorator(PatientEventDecorator):
             visit_occurrence.where(F.col("visit_concept_id").isin([9201, 262, 8971, 8920]))
             .withColumn(
                 "standard_concept_id",
-                F.coalesce(F.col("discharged_to_concept_id"), F.lit(0)),
+                F.coalesce(F.col("discharged_to_concept_id"), F.lit("0")),
             )
             .withColumn("visit_concept_order", F.col("max_visit_concept_order"))
             .withColumn("concept_order", F.col("max_concept_order") + 1)
@@ -272,6 +273,17 @@ class AttEventDecorator(PatientEventDecorator):
             .drop("discharged_to_concept_id", "visit_end_date")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
+        )
+
+        # Set standard_concept_id to "Discharge/0" instead of "0"
+        discharge_events = discharge_events.withColumn(
+            "standard_concept_id",
+            F.when(
+                F.col("standard_concept_id").cast("string") == "0",
+                F.lit(DISCHARGE_UNKNOWN_TOKEN)
+            ).otherwise(
+                F.col("standard_concept_id")
+            )
         )
 
         # Add discharge events to the inpatient visits

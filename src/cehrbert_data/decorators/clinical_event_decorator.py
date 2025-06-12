@@ -34,7 +34,6 @@ class ClinicalEventDecorator(PatientEventDecorator):
         """
 
         # todo: create an assertion the dataframe contains the above columns
-
         valid_visit_ids = patient_events.select("visit_occurrence_id", "cohort_member_id").distinct()
 
         # Add visit_start_date to the patient_events dataframe and create the visit rank
@@ -110,39 +109,13 @@ class ClinicalEventDecorator(PatientEventDecorator):
             ).otherwise(F.col("visit_start_datetime"))
         ).cast(T.TimestampType())
 
-        # We need to bound the medical event dates between visit_start_date and visit_end_date
-        bound_medical_event_date = F.when(
-            F.col("date") < F.col("visit_start_date"), F.col("visit_start_date")
-        ).otherwise(F.when(F.col("date") > F.col("visit_end_date"), F.col("visit_end_date")).otherwise(F.col("date")))
-
-        # We need to bound the medical event dates between visit_start_date and visit_end_date
-        bound_medical_event_datetime = F.when(
-            F.col("datetime") < F.col("visit_start_datetime"),
-            F.col("visit_start_datetime"),
-        ).otherwise(
-            F.when(
-                F.col("datetime") > F.col("visit_end_datetime"),
-                F.col("visit_end_datetime"),
-            ).otherwise(F.col("datetime"))
-        )
-
-        outpatient_datetime_udf = (
-            F.when(
-                F.col("is_inpatient") == 0,
-                F.to_timestamp("date")
-            ).otherwise(F.col("datetime"))
-        )
-
         patient_events = (
             patient_events.join(visits, ["cohort_member_id", "visit_occurrence_id"])
-            .withColumn("datetime", F.to_timestamp("datetime"))
+            .withColumn("datetime", F.coalesce(F.to_timestamp("datetime"), F.to_timestamp("date")))
             .withColumn("visit_start_datetime", visit_start_datetime_udf)
             .withColumn("visit_end_date", visit_end_date_udf)
             .withColumn("visit_end_datetime", F.date_add("visit_end_date", 1).cast(T.TimestampType()))
             .withColumn("visit_end_datetime", F.expr("visit_end_datetime - INTERVAL 1 MINUTE"))
-            .withColumn("date", bound_medical_event_date)
-            .withColumn("datetime", bound_medical_event_datetime)
-            .withColumn("datetime", outpatient_datetime_udf)
             .withColumn("concept_order", concept_order_udf)
             .withColumn("visit_concept_order", visit_concept_order_udf)
             .drop("is_inpatient", "visit_end_date", "visit_end_datetime")
