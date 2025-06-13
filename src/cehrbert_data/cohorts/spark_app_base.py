@@ -535,7 +535,10 @@ class NestedCohortBuilder:
             )
             cohort = cohort.withColumn("record_rank", record_rank).where("record_rank == 1").drop("record_rank")
 
-        if not self._exclude_features:
+        if self._exclude_features:
+            # We need to remove the samples that do not have any records in the prediction window
+            cohort = self.filter_cohort_with_ehr_records(cohort)
+        else:
             ehr_records_for_cohorts = self.extract_ehr_records_for_cohort(cohort)
             cohort = (
                 cohort.join(ehr_records_for_cohorts, ["person_id", "cohort_member_id"])
@@ -611,7 +614,64 @@ class NestedCohortBuilder:
                 os.path.join(self._output_data_folder, "data")
             )
 
-    def extract_ehr_records_for_cohort(self, cohort: DataFrame):
+    def _create_ehr_record_filter(self):
+        # Only allow the data records that occurred between the index date and the prediction window
+        if self._is_population_estimation:
+            if self._is_prediction_window_unbounded:
+                record_window_filter = F.col("ehr.datetime") <= F.current_timestamp()
+            else:
+                record_window_filter = (
+                        F.col("ehr.datetime") <=
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
+                )
+        else:
+            # For patient level prediction, we remove all records post index date
+            if self._is_observation_post_index:
+                record_window_filter = F.col("ehr.datetime").between(
+                    F.col("cohort.index_date"),
+                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS + INTERVAL 0.1 SECOND")
+                )
+            else:
+                if self._is_observation_window_unbounded:
+                    record_window_filter = (
+                            F.col("ehr.datetime")
+                            <= F.expr(
+                        f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
+                    )
+                else:
+                    record_window_filter = F.col("ehr.datetime").between(
+                        F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
+                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND"),
+                    )
+        return record_window_filter
+
+    def filter_cohort_with_ehr_records(self, cohort: DataFrame) -> DataFrame:
+        # Extract all ehr records for the patients
+        ehr_records = extract_ehr_records(
+            spark=self.spark,
+            input_folder=self._input_folder,
+            domain_table_list=self._ehr_table_list,
+            include_visit_type=self._include_visit_type,
+            with_diagnosis_rollup=self._is_roll_up_concept,
+            with_drug_rollup=self._is_drug_roll_up_concept,
+            include_concept_list=self._include_concept_list,
+            refresh_measurement=self._refresh_measurement,
+            aggregate_by_hour=self._aggregate_by_hour,
+            keep_orphan_records=self._should_construct_artificial_visits,
+        )
+
+        cohort = cohort.alias("cohort").join(
+            ehr_records.select("person_id", "datetime").distinct().alias("ehr"),
+            F.col("ehr.person_id") == F.col("cohort.person_id")
+        ).where(
+            self._create_ehr_record_filter()
+        ).select(
+            [F.col("cohort." + field_name) for field_name in cohort.schema.fieldNames()]
+        )
+
+        return cohort
+
+    def extract_ehr_records_for_cohort(self, cohort: DataFrame) -> DataFrame:
         """
         Create the patient sequence based on the observation window for the given cohort.
 
@@ -683,42 +743,13 @@ class NestedCohortBuilder:
             [F.col("ehr." + col) for col in ehr_records.columns] + [F.col("cohort.cohort_member_id")]
         ).selectExpr("*")
 
-        # Only allow the data records that occurred between the index date and the prediction window
-        if self._is_population_estimation:
-            if self._is_prediction_window_unbounded:
-                record_window_filter = F.col("ehr.datetime") <= F.current_timestamp()
-            else:
-                record_window_filter = (
-                        F.col("ehr.datetime") <=
-                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
-                )
-        else:
-            # For patient level prediction, we remove all records post index date
-            if self._is_observation_post_index:
-                record_window_filter = F.col("ehr.datetime").between(
-                    F.col("cohort.index_date"),
-                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS + INTERVAL 0.1 SECOND")
-                )
-            else:
-                if self._is_observation_window_unbounded:
-                    record_window_filter = (
-                            F.col("ehr.datetime")
-                            <= F.expr(
-                        f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
-                    )
-                else:
-                    record_window_filter = F.col("ehr.datetime").between(
-                        F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
-                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND"),
-                    )
-
         # Somehow the dataframe join does not work without using the alias
         cohort_ehr_records = ehr_records.alias("ehr").join(
             cohort.alias("cohort"),
             (F.col("ehr.person_id") == F.col("cohort.person_id")) &
             (F.col("ehr.cohort_member_id") == F.col("cohort.cohort_member_id")),
         ).where(
-            record_window_filter
+            self._create_ehr_record_filter()
         ).select(
             [F.col("ehr." + field_name) for field_name in ehr_records.schema.fieldNames()]
         )
