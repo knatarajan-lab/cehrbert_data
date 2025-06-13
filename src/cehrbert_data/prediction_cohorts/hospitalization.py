@@ -23,8 +23,8 @@ WITH INDEX_VISIT_TABLE AS
 (
     SELECT DISTINCT
         person_id,
-        FIRST(visit_start_date) OVER (PARTITION BY person_id ORDER BY visit_start_date, visit_occurrence_id) AS index_date,
-        FIRST(visit_occurrence_id) OVER (PARTITION BY person_id ORDER BY visit_start_date, visit_occurrence_id) AS visit_occurrence_id
+        FIRST(visit_start_datetime) OVER (PARTITION BY person_id ORDER BY visit_start_datetime, visit_occurrence_id) AS index_date,
+        FIRST(visit_occurrence_id) OVER (PARTITION BY person_id ORDER BY visit_start_datetime, visit_occurrence_id) AS visit_occurrence_id
     FROM global_temp.visit_occurrence
     WHERE visit_end_date >= visit_start_date
 ),
@@ -32,7 +32,7 @@ HOSPITAL_TARGET AS
 (
     SELECT DISTINCT
         iv.person_id,
-        iv.index_date,
+        iv.index_date + INTERVAL {total_window} DAYS AS index_date,
         count(distinct case when v1.visit_concept_id IN (9201, 262) then v1.visit_occurrence_id end) as num_of_hospitalizations,
         count(distinct v1.visit_occurrence_id) as num_of_visits
     FROM INDEX_VISIT_TABLE iv
@@ -74,7 +74,6 @@ def main(spark_args):
         dependency_list=DEPENDENCY_LIST,
         query=hospitalization_target_query,
     )
-
     hospitalization_outcome_query = QuerySpec(
         table_name=HOSPITALIZATION_OUTCOME_COHORT,
         query_template=HOSPITALIZATION_OUTCOME_QUERY,
