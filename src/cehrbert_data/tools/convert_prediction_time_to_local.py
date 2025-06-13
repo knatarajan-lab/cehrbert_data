@@ -37,13 +37,15 @@ if __name__ == "__main__":
         "--input_dir",
         dest="input_dir",
         type=Path,
-        help="Path to input directory containing parquet files."
+        help="Path to input directory containing parquet files.",
+        required=True,
     )
     parser.add_argument(
         "--output_dir",
         dest="output_dir",
         type=Path,
-        help="Path to output directory for processed files."
+        help="Path to output directory for processed files.",
+        required=True,
     )
     parser.add_argument(
         "--timezone",
