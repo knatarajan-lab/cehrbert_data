@@ -289,7 +289,6 @@ class NestedCohortBuilder:
             num_of_visits: int,
             num_of_concepts: int,
             patient_splits_folder: str = None,
-            is_window_post_index: bool = False,
             include_visit_type: bool = True,
             allow_measurement_only: bool = False,
             exclude_visit_tokens: bool = False,
@@ -334,7 +333,6 @@ class NestedCohortBuilder:
         self._prediction_window = prediction_window
         self._num_of_visits = num_of_visits
         self._num_of_concepts = num_of_concepts
-        self._is_observation_post_index = is_window_post_index
         self._is_observation_window_unbounded = is_observation_window_unbounded
         self._include_visit_type = include_visit_type
         self._exclude_visit_tokens = exclude_visit_tokens
@@ -380,7 +378,6 @@ class NestedCohortBuilder:
             f"hold_off_window: {hold_off_window}\n"
             f"num_of_visits: {num_of_visits}\n"
             f"num_of_concepts: {num_of_concepts}\n"
-            f"is_window_post_index: {is_window_post_index}\n"
             f"include_visit_type: {include_visit_type}\n"
             f"exclude_visit_tokens: {exclude_visit_tokens}\n"
             f"allow_measurement_only: {allow_measurement_only}\n"
@@ -427,10 +424,6 @@ class NestedCohortBuilder:
 
         prediction_start_days = self._prediction_start_days
         prediction_window = self._prediction_window
-
-        if self._is_observation_post_index:
-            prediction_start_days += self._observation_window + self._hold_off_window
-            prediction_window += self._observation_window + self._hold_off_window
 
         if self._is_first_time_outcome:
             target_cohort = self.spark.sql(
@@ -625,24 +618,17 @@ class NestedCohortBuilder:
                         F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                 )
         else:
-            # For patient level prediction, we remove all records post index date
-            if self._is_observation_post_index:
-                record_window_filter = F.col("ehr.datetime").between(
-                    F.col("cohort.index_date"),
-                    F.expr(f"cohort.index_date + INTERVAL {self._observation_window} DAYS + INTERVAL 0.1 SECOND")
+            if self._is_observation_window_unbounded:
+                record_window_filter = (
+                        F.col("ehr.datetime")
+                        <= F.expr(
+                    f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
                 )
             else:
-                if self._is_observation_window_unbounded:
-                    record_window_filter = (
-                            F.col("ehr.datetime")
-                            <= F.expr(
-                        f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND")
-                    )
-                else:
-                    record_window_filter = F.col("ehr.datetime").between(
-                        F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
-                        F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND"),
-                    )
+                record_window_filter = F.col("ehr.datetime").between(
+                    F.expr(f"cohort.index_date - INTERVAL {self._observation_window + self._hold_off_window} DAYS"),
+                    F.expr(f"cohort.index_date - INTERVAL {self._hold_off_window} DAYS + INTERVAL 0.1 SECOND"),
+                )
         return record_window_filter
 
     def filter_cohort_with_ehr_records(self, cohort: DataFrame) -> DataFrame:
@@ -823,15 +809,6 @@ def create_prediction_cohort(
     # Add logging to spark application output when enable_logging is set to True
     if spark_args.enable_logging:
         add_console_logging()
-
-    # Toggle the prior/post observation_period depending on the is_window_post_index flag
-    prior_observation_period = (
-        0 if spark_args.is_window_post_index else spark_args.observation_window + spark_args.hold_off_window
-    )
-    post_observation_period = (
-        spark_args.observation_window + spark_args.hold_off_window if spark_args.is_window_post_index else 0
-    )
-
     # Generate the target cohort
     target_cohort = (
         BaseCohortBuilder(
@@ -842,8 +819,8 @@ def create_prediction_cohort(
             date_upper_bound=spark_args.date_upper_bound,
             age_lower_bound=spark_args.age_lower_bound,
             age_upper_bound=spark_args.age_upper_bound,
-            prior_observation_period=prior_observation_period,
-            post_observation_period=post_observation_period,
+            prior_observation_period=spark_args.observation_window + spark_args.hold_off_window,
+            post_observation_period=0,
             continue_job=spark_args.continue_job
         )
         .build()
@@ -882,7 +859,6 @@ def create_prediction_cohort(
         prediction_window=spark_args.prediction_window,
         num_of_visits=spark_args.num_of_visits,
         num_of_concepts=spark_args.num_of_concepts,
-        is_window_post_index=spark_args.is_window_post_index,
         include_visit_type=spark_args.include_visit_type,
         exclude_visit_tokens=spark_args.exclude_visit_tokens,
         allow_measurement_only=spark_args.allow_measurement_only,

@@ -59,7 +59,6 @@ def create_spark_args(parse: bool = True):
         -hw, --hold_off_window: The hold-off window for excluding certain features.
         --num_of_visits: The minimum number of visits required for cohort inclusion.
         --num_of_concepts: The minimum number of concepts required for cohort inclusion.
-        -iw, --is_window_post_index: Whether the observation window is post-index.
         -iv, --include_visit_type: Whether to include visit types in feature generation.
         -ev, --exclude_visit_tokens: Whether to exclude certain visit tokens (VS and VE).
         -f, --is_feature_concept_frequency: Whether the features are based on concept counts.
@@ -228,13 +227,6 @@ def create_spark_args(parse: bool = True):
         required=False,
         type=int,
         default=0,
-    )
-    parser.add_argument(
-        "-iw",
-        "--is_window_post_index",
-        dest="is_window_post_index",
-        action="store_true",
-        help="Indicate if the observation window is pre/post the index date",
     )
     parser.add_argument(
         "-iv",
