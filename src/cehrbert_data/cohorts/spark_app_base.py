@@ -667,7 +667,7 @@ class NestedCohortBuilder:
             self._create_ehr_record_filter()
         ).select(
             [F.col("cohort." + field_name) for field_name in cohort.schema.fieldNames()]
-        )
+        ).distinct()
 
         return cohort
 
