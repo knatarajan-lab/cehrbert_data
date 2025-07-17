@@ -572,6 +572,7 @@ def create_sequence_data_with_att(
         "concept_order",
         "priority",
         "unit",
+        "epoch_time",
     ]
     output_columns = [
         "cohort_member_id",
@@ -595,10 +596,12 @@ def create_sequence_data_with_att(
         "concept_orders",
         "record_ranks",
         "units",
+        "epoch_times",
     ]
 
     patient_grouped_events = (
         patient_events.withColumn("order", order_udf)
+        .withColumn("epoch_time", F.unix_timestamp("datetime"))
         .withColumn("record_rank", dense_rank_udf)
         .withColumn("data_for_sorting", F.struct(struct_columns))
         .groupBy("cohort_member_id", "person_id")
@@ -627,6 +630,7 @@ def create_sequence_data_with_att(
         .withColumn("mlm_skip_values", F.col("data_for_sorting.mlm_skip_value"))
         .withColumn("visit_concept_ids", F.col("data_for_sorting.visit_concept_id"))
         .withColumn("units", F.col("data_for_sorting.unit"))
+        .withColumn("epoch_times", F.col("data_for_sorting.epoch_time"))
     )
     return patient_grouped_events.select(output_columns)
 
