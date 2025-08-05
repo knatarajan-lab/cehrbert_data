@@ -37,6 +37,7 @@ from cehrbert_data.decorators import (
 
 from cehrbert_data.utils.vocab_utils import roll_up_to_drug_ingredients, roll_up_diagnosis, roll_up_procedure
 
+
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
         (
@@ -927,7 +928,8 @@ def extract_ehr_records(
         visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
         patient_ehr_records = patient_ehr_records.join(
             visit_occurrence,
-            "visit_occurrence_id"
+            "visit_occurrence_id",
+            "left_outer"
         ).select(
             patient_ehr_records["person_id"],
             patient_ehr_records["standard_concept_id"],
@@ -939,8 +941,8 @@ def extract_ehr_records(
             patient_ehr_records["number_as_value"],
             patient_ehr_records["concept_as_value"],
             patient_ehr_records["event_group_id"],
-            visit_occurrence["visit_concept_id"],
             patient_ehr_records["age"],
+            visit_occurrence["visit_concept_id"],
         )
     return patient_ehr_records
 
