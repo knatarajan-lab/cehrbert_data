@@ -21,7 +21,8 @@ from cehrbert_data.utils.spark_utils import (
     preprocess_domain_table,
     extract_events_by_domain,
     validate_table_names,
-    construct_artificial_visits
+    construct_artificial_visits,
+    invalidate_visit_id
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -82,6 +83,8 @@ def main(
     )
 
     concept = preprocess_domain_table(spark, input_folder, CONCEPT)
+    visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
+
     patient_ehr_events = None
     for domain_table_name in domain_table_list:
         domain_table = preprocess_domain_table(
@@ -89,6 +92,10 @@ def main(
             input_folder=input_folder,
             domain_table_name=domain_table_name,
             with_drug_rollup=with_drug_rollup
+        )
+        domain_table = invalidate_visit_id(
+            domain_table,
+            visit_occurrence
         )
         ehr_events = extract_events_by_domain(
             domain_table,
@@ -103,7 +110,6 @@ def main(
         else:
             patient_ehr_events = patient_ehr_events.unionByName(ehr_events)
 
-    visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
     visit_occurrence = visit_occurrence.select(
         "visit_occurrence_id",
         "visit_start_date",
