@@ -120,6 +120,29 @@ def main(
         "person_id",
         "discharged_to_concept_id",
     )
+
+    if include_concept_list and patient_ehr_events:
+        # Filter out concepts
+        qualified_concepts = preprocess_domain_table(spark, input_folder, "qualified_concept_list")
+        patient_ehr_events = patient_ehr_events.join(
+            qualified_concepts.select("standard_concept_id"), "standard_concept_id"
+        )
+
+    if not continue_from_events:
+        patient_ehr_events.write.mode("overwrite").parquet(os.path.join(output_folder, "all_patient_events"))
+
+    patient_ehr_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
+    if should_construct_artificial_visits:
+        # Construct artificial visits or re-link the visits for the problem list events
+        patient_ehr_events, visit_occurrence = construct_artificial_visits(
+            patient_ehr_events,
+            visit_occurrence,
+            spark=spark,
+            persistence_folder=output_folder,
+            duplicate_records=duplicate_records,
+            disconnect_problem_list_records=disconnect_problem_list_records
+        )
+
     person = preprocess_domain_table(spark, input_folder, PERSON)
     birth_datetime_udf = F.coalesce("birth_datetime", F.concat("year_of_birth", F.lit("-01-01")).cast("timestamp"))
     person = person.select(
@@ -128,7 +151,6 @@ def main(
         "race_concept_id",
         "gender_concept_id",
     )
-
     visit_occurrence_person = visit_occurrence.join(person, "person_id").withColumn(
         "age",
         F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12)),
@@ -136,13 +158,6 @@ def main(
     visit_occurrence_person = visit_occurrence_person.drop("birth_datetime")
 
     death = preprocess_domain_table(spark, input_folder, DEATH) if include_death else None
-
-    if include_concept_list and patient_ehr_events:
-        # Filter out concepts
-        qualified_concepts = preprocess_domain_table(spark, input_folder, "qualified_concept_list")
-        patient_ehr_events = patient_ehr_events.join(
-            qualified_concepts.select("standard_concept_id"), "standard_concept_id"
-        )
 
     patient_ehr_events = (
         patient_ehr_events.join(visit_occurrence_person, "visit_occurrence_id")
@@ -157,31 +172,6 @@ def main(
     # We only keep the patient records, whose corresponding age is less than 90
     if apply_age_filter:
         patient_ehr_events = patient_ehr_events.where(F.col("age") < 90)
-
-    if not continue_from_events:
-        patient_ehr_events.write.mode("overwrite").parquet(os.path.join(output_folder, "all_patient_events"))
-
-    patient_ehr_events = spark.read.parquet(os.path.join(output_folder, "all_patient_events"))
-    if should_construct_artificial_visits:
-        # Construct artificial visits or re-link the visits for the problem list events
-        patient_ehr_events, visit_occurrence_person = construct_artificial_visits(
-            patient_ehr_events,
-            visit_occurrence_person,
-            spark=spark,
-            persistence_folder=output_folder,
-            duplicate_records=duplicate_records,
-            disconnect_problem_list_records=disconnect_problem_list_records
-        )
-        # Update age if some of the ehr_records have been re-associated with the new visits
-        patient_ehr_events = patient_ehr_events.join(
-            person.select("person_id", "birth_datetime"),
-            "person_id",
-        ).join(
-            visit_occurrence_person.select("visit_occurrence_id", "visit_start_date"), "visit_occurrence_id"
-        ).withColumn(
-            "age",
-            F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12))
-        ).drop("visit_start_date", "birth_datetime")
 
     if is_new_patient_representation:
         patient_sequence_data = create_sequence_data_with_att(
