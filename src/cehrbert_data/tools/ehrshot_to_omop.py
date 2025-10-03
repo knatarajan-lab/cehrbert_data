@@ -784,7 +784,12 @@ def drop_duplicate_visits(data: DataFrame) -> DataFrame:
 
 
 def main(args):
-    spark = SparkSession.builder.appName("Convert EHRShot Data").getOrCreate()
+    spark = (
+        SparkSession.builder
+        .appName("Convert EHRShot Data")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
 
     logger.info(
         f"ehr_shot_file: {args.ehr_shot_file}\n"

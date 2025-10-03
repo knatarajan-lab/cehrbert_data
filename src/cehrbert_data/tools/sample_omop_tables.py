@@ -19,6 +19,7 @@ omop_tables = [
 def main(args):
     spark = (
         SparkSession.builder.appName("Sample OMOP Tables")
+        .config("spark.sql.session.timeZone", "UTC")
         .config("spark.sql.legacy.parquet.int96RebaseModeInRead", "CORRECTED")
         .config("spark.sql.legacy.parquet.int96RebaseModeInWrite", "CORRECTED")
         .config("spark.sql.legacy.parquet.datetimeRebaseModeInRead", "CORRECTED")

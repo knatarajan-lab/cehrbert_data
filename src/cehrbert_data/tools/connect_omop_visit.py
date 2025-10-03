@@ -226,7 +226,12 @@ def step_2_connect_outpatient_to_inpatient(
 
 
 def main(args):
-    spark = SparkSession.builder.appName("Clean up visit_occurrence").getOrCreate()
+    spark = (
+        SparkSession.builder
+        .appName("Clean up visit_occurrence")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
     visit_occurrence = spark.read.parquet(os.path.join(args.input_folder, "visit_occurrence"))
     visit_occurrence_step_1, in_to_in_visit_mapping = step_1_consolidate_inpatient_visits(
         spark,
