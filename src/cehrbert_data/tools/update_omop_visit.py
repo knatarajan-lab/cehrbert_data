@@ -7,7 +7,12 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as f
 
 def main(args):
-    spark = SparkSession.builder.appName("Clean up visit_occurrence").getOrCreate()
+    spark = (
+        SparkSession.builder
+        .appName("Clean up visit_occurrence")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
     visit_mapping = spark.read.parquet(
         os.path.join(args.output_folder, "visit_mapping")
     )
