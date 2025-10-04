@@ -209,7 +209,7 @@ def extract_events_by_domain(
             domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
                 F.col(concept_id_field).isNotNull()
             )
-            datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field), "yyyy-MM-dd HH:mm:ss")
+            datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field))
             domain_records = (
                 domain_records.where(F.col(concept_id_field).cast("string") != "0")
                 .withColumn("date", F.to_date(F.col(date_field)))
@@ -282,10 +282,6 @@ def extract_events_by_domain(
                 F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(domain_records) else F.lit(NA).alias("unit"),
             ).distinct()
-
-            # Remove "Patient Died" from condition_occurrence
-            if domain_table_name.startswith("condition"):
-                domain_records = domain_records.where("condition_concept_id != 4216643")
 
         if ehr_events is None:
             ehr_events = domain_records
@@ -599,7 +595,8 @@ def create_sequence_data_with_att(
             "priority",
             "datetime",
             "event_group_id",
-            "standard_concept_id",
+            # This is for the ICD10/9 parts to be in the right order
+            F.desc("standard_concept_id"),
         )
     )
 
