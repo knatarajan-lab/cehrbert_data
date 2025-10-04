@@ -14,6 +14,7 @@ class AttType(Enum):
     MONTH = "month"
     CEHR_BERT = "cehr_bert"
     MIX = "mix"
+    ETHOS = "ethos"
     NONE = "none"
 
 
@@ -152,6 +153,35 @@ def time_mix_token(time_delta: int) -> Optional[str]:
     return "LT"
 
 
+def ethos_time_token_func(time_delta: int) -> Optional[str]:
+    if time_delta is None or np.isnan(time_delta):
+        return None
+    if time_delta <= 2:
+        return f"D1"
+    if time_delta <= 4:
+        # e.g. 8 -> W2
+        return f"D2"
+    if time_delta <= 7:
+        # e.g. 31 -> M2
+        return f"D4"
+    if time_delta <= 12:
+        # e.g. 31 -> M2
+        return f"D7"
+    if time_delta <= 20:
+        # e.g. 31 -> M2
+        return f"D12"
+    if time_delta <= 30:
+        # e.g. 31 -> M2
+        return f"D20"
+    if time_delta <= 60:
+        # e.g. 31 -> M2
+        return f"D30"
+    if time_delta <= 180:
+        # e.g. 31 -> M2
+        return f"D60"
+    return "D100"
+
+
 def get_att_function(att_type: Union[AttType, str]) -> Callable:
     # Convert the att_type str to the corresponding enum type
     if isinstance(att_type, str):
@@ -167,4 +197,6 @@ def get_att_function(att_type: Union[AttType, str]) -> Callable:
         return time_mix_token
     elif att_type == AttType.CEHR_BERT:
         return time_token_func
+    elif att_type == AttType.ETHOS:
+        return ethos_time_token_func
     return None

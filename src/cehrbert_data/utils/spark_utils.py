@@ -550,7 +550,7 @@ def create_sequence_data_with_att(
 
     dense_rank_udf = F.dense_rank().over(
         W.partitionBy("cohort_member_id", "person_id").orderBy(
-            "visit_rank_order", "concept_order", "priority", "datetime"
+            "visit_rank_order", "concept_order", "priority", "datetime", "event_group_id"
         )
     )
 
@@ -1090,7 +1090,7 @@ def get_measurement_events(
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id AS visit_occurrence_id,
             'measurement' AS domain,
-            CAST(NULL AS STRING) AS event_group_id,
+            CAST(measurement_id AS STRING) AS event_group_id,
             m.value_as_number AS number_as_value,
             CAST(m.value_as_concept_id AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, m.unit_source_value, 'N/A') AS unit
