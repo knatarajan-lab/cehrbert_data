@@ -43,7 +43,7 @@ DOMAIN_KEY_FIELDS = {
             "condition_concept_id",
             "condition_start_date",
             "condition_start_datetime",
-            "condition"
+            "condition_occurrence"
         )
     ],
     "procedure_occurrence_id": [
@@ -51,7 +51,7 @@ DOMAIN_KEY_FIELDS = {
             "procedure_concept_id",
             "procedure_date",
             "procedure_datetime",
-            "procedure"
+            "procedure_occurrence"
         )
     ],
     "drug_exposure_id": [
@@ -59,7 +59,7 @@ DOMAIN_KEY_FIELDS = {
             "drug_concept_id",
             "drug_exposure_start_date",
             "drug_exposure_start_datetime",
-            "drug"
+            "drug_exposure"
         )
     ],
     "measurement_id": [
@@ -83,13 +83,13 @@ DOMAIN_KEY_FIELDS = {
             "device_concept_id",
             "device_exposure_start_date",
             "device_exposure_start_datetime",
-            "device"
+            "device_exposure"
         )
     ],
     "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
-        ("visit_concept_id", "visit_start_date", "visit"),
-        ("discharged_to_concept_id", "visit_end_date", "visit"),
+        ("visit_concept_id", "visit_start_date", "visit_occurrence"),
+        ("discharged_to_concept_id", "visit_end_date", "visit_occurrence"),
     ],
 }
 
@@ -216,7 +216,7 @@ def extract_events_by_domain(
                 .withColumn("datetime", datetime_field_udf)
             )
             concept: DataFrame = kwargs.get("concept")
-            if domain_table_name == "condition_occurrence":
+            if domain_table_name.startswith("condition"):
                 domain_records = domain_records.join(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
                     domain_records["condition_source_concept_id"] == concept["concept_id"],
@@ -244,7 +244,7 @@ def extract_events_by_domain(
                     )
                 )
 
-            elif domain_table_name == "procedure_occurrence":
+            elif domain_table_name.startswith("procedure"):
                 domain_records = domain_records.join(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
                     domain_records["procedure_source_concept_id"] == concept["concept_id"],
@@ -276,7 +276,7 @@ def extract_events_by_domain(
                 domain_records["date"].cast("date"),
                 domain_records["datetime"].cast(T.TimestampType()),
                 domain_records["visit_occurrence_id"],
-                F.lit(domain_table_name).alias("domain"),
+                F.lit(domain_table_name.split("_")[0]).alias("domain"),
                 F.col(f"{domain_table_name}_id").cast("string").alias("event_group_id"),
                 F.lit(None).cast("float").alias("number_as_value"),
                 F.lit(None).cast("string").alias("concept_as_value"),
@@ -284,7 +284,7 @@ def extract_events_by_domain(
             ).distinct()
 
             # Remove "Patient Died" from condition_occurrence
-            if domain_table_name == "condition_occurrence":
+            if domain_table_name.startswith("condition"):
                 domain_records = domain_records.where("condition_concept_id != 4216643")
 
         if ehr_events is None:
@@ -598,6 +598,7 @@ def create_sequence_data_with_att(
             "concept_order",
             "priority",
             "datetime",
+            "event_group_id",
             "standard_concept_id",
         )
     )
