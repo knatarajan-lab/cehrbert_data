@@ -121,6 +121,30 @@ def main(
         "discharged_to_concept_id",
     )
 
+
+    person = preprocess_domain_table(spark, input_folder, PERSON)
+    birth_datetime_udf = F.coalesce("birth_datetime", F.concat("year_of_birth", F.lit("-01-01")).cast("timestamp"))
+    person = person.select(
+        "person_id",
+        birth_datetime_udf.alias("birth_datetime"),
+        "race_concept_id",
+        "gender_concept_id",
+    )
+    visit_occurrence_person = visit_occurrence.join(person, "person_id").withColumn(
+        "age",
+        F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12)),
+    )
+    visit_occurrence_person = visit_occurrence_person.drop("birth_datetime")
+
+    patient_ehr_events = (
+        patient_ehr_events.join(visit_occurrence_person, "visit_occurrence_id")
+        .select(
+            [patient_ehr_events[fieldName] for fieldName in patient_ehr_events.schema.fieldNames()]
+            + ["visit_concept_id", "age"]
+        )
+        .withColumn("cohort_member_id", F.col("person_id"))
+    )
+
     if include_concept_list and patient_ehr_events:
         # Filter out concepts
         qualified_concepts = preprocess_domain_table(spark, input_folder, "qualified_concept_list")
@@ -143,30 +167,7 @@ def main(
             disconnect_problem_list_records=disconnect_problem_list_records
         )
 
-    person = preprocess_domain_table(spark, input_folder, PERSON)
-    birth_datetime_udf = F.coalesce("birth_datetime", F.concat("year_of_birth", F.lit("-01-01")).cast("timestamp"))
-    person = person.select(
-        "person_id",
-        birth_datetime_udf.alias("birth_datetime"),
-        "race_concept_id",
-        "gender_concept_id",
-    )
-    visit_occurrence_person = visit_occurrence.join(person, "person_id").withColumn(
-        "age",
-        F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12)),
-    )
-    visit_occurrence_person = visit_occurrence_person.drop("birth_datetime")
-
     death = preprocess_domain_table(spark, input_folder, DEATH) if include_death else None
-
-    patient_ehr_events = (
-        patient_ehr_events.join(visit_occurrence_person, "visit_occurrence_id")
-        .select(
-            [patient_ehr_events[fieldName] for fieldName in patient_ehr_events.schema.fieldNames()]
-            + ["visit_concept_id", "age"]
-        )
-        .withColumn("cohort_member_id", F.col("person_id"))
-    )
 
     # Apply the age security measure
     # We only keep the patient records, whose corresponding age is less than 90

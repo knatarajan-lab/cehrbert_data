@@ -746,12 +746,9 @@ def construct_artificial_visits(
     )
 
     if disconnect_problem_list_records:
-        visit_columns = ["visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"]
-        if not "visit_concept_id" in patient_events.columns:
-            visit_columns.append("visit_concept_id")
         # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
         updated_patient_events = patient_events.join(
-            visit.select(visit_columns),
+            visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
             "visit_occurrence_id",
             "left_outer"
         ).withColumn(
