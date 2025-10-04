@@ -37,7 +37,6 @@ from cehrbert_data.decorators import (
 
 from cehrbert_data.utils.vocab_utils import roll_up_to_drug_ingredients, roll_up_diagnosis, roll_up_procedure
 
-
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
         (
@@ -180,7 +179,7 @@ def extract_events_by_domain(
     ) in get_key_fields(domain_table):
 
         if is_domain_numeric(domain_table_name):
-            concept = kwargs.get("concept")
+            concept: DataFrame = kwargs.get("concept")
             spark = kwargs.get("spark", None)
             persistence_folder = kwargs.get("persistence_folder", None)
             refresh = kwargs.get("refresh_measurement", False)
@@ -216,6 +215,61 @@ def extract_events_by_domain(
                 .withColumn("date", F.to_date(F.col(date_field)))
                 .withColumn("datetime", datetime_field_udf)
             )
+            concept: DataFrame = kwargs.get("concept")
+            if domain_table_name == "condition_occurrence":
+                domain_records = domain_records.join(
+                    concept.select("concept_id", "vocabulary_id", "concept_code"),
+                    domain_records["condition_source_concept_id"] == concept["concept_id"],
+                    "left_outer",
+                ).withColumn(
+                    concept_id_field,
+                    F.explode(
+                        F.split(
+                            F.when(
+                                F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
+                                F.col("concept_code"),
+                            ).otherwise(
+                                F.col(concept_id_field)
+                            ),
+                            "\\."  # Escape the dot for regex
+                        )
+                    ),
+                ).withColumn(
+                    concept_id_field,
+                    F.when(
+                        F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col(concept_id_field)),
+                    ).otherwise(
+                        F.col(concept_id_field)
+                    )
+                )
+
+            elif domain_table_name == "procedure_occurrence":
+                domain_records = domain_records.join(
+                    concept.select("concept_id", "vocabulary_id", "concept_code"),
+                    domain_records["procedure_source_concept_id"] == concept["concept_id"],
+                    "left_outer",
+                ).withColumn(
+                    concept_id_field + "_array",
+                    F.when(
+                        F.col("vocabulary_id") == "ICD10PCS",
+                        F.split(F.col("concept_code"), "")
+                    ).otherwise(
+                        F.array(F.col(concept_id_field))
+                    )
+                ).withColumn(
+                    concept_id_field,
+                    F.explode(F.col(concept_id_field + "_array"))
+                ).drop(concept_id_field + "_array").withColumn(
+                    concept_id_field,
+                    F.when(
+                        F.col("vocabulary_id") == "ICD10PCS",
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col(concept_id_field)),
+                    ).otherwise(
+                        F.col(concept_id_field)
+                    )
+                )
+
             domain_records = domain_records.select(
                 domain_records["person_id"],
                 domain_records[concept_id_field].alias("standard_concept_id"),
@@ -223,7 +277,7 @@ def extract_events_by_domain(
                 domain_records["datetime"].cast(T.TimestampType()),
                 domain_records["visit_occurrence_id"],
                 F.lit(domain_table_name).alias("domain"),
-                F.lit(None).cast("string").alias("event_group_id"),
+                F.col(f"{domain_table_name}_id").cast("string").alias("event_group_id"),
                 F.lit(None).cast("float").alias("number_as_value"),
                 F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(domain_records) else F.lit(NA).alias("unit"),
@@ -723,7 +777,8 @@ def construct_artificial_visits(
         )
 
         if duplicate_records:
-            patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
+            patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(
+                patient_events)
         else:
             patient_events = updated_patient_events
 
@@ -828,6 +883,7 @@ def construct_artificial_visits(
 
     return refreshed_patient_events, visit_occurrence
 
+
 def invalidate_visit_id(domain_table, visit_occurrence):
     # Create a flag for valid IDs
     valid_ids = visit_occurrence.select("visit_occurrence_id").distinct()
@@ -845,6 +901,7 @@ def invalidate_visit_id(domain_table, visit_occurrence):
         "visit_occurrence_id_cleaned", "visit_occurrence_id"
     )
     return domain_table
+
 
 def extract_ehr_records(
         spark: SparkSession,
@@ -1083,10 +1140,9 @@ def get_measurement_events(
     measurement.createOrReplaceTempView(MEASUREMENT)
     measurement_events = spark.sql(
         """
-        SELECT DISTINCT
-            m.person_id,
-            m.measurement_concept_id AS standard_concept_id,
-            CAST(m.measurement_date AS DATE) AS date,
+        SELECT DISTINCT m.person_id,
+                        m.measurement_concept_id AS standard_concept_id,
+                        CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id AS visit_occurrence_id,
             'measurement' AS domain,
@@ -1095,8 +1151,8 @@ def get_measurement_events(
             CAST(m.value_as_concept_id AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, m.unit_source_value, 'N/A') AS unit
         FROM measurement AS m
-        LEFT JOIN concept AS c
-            ON m.unit_concept_id = c.concept_id
+            LEFT JOIN concept AS c
+        ON m.unit_concept_id = c.concept_id
         """
     )
     numeric_events = measurement_events.where(F.col("number_as_value").isNotNull())
@@ -1155,10 +1211,9 @@ def get_observation_events(
     observation.createOrReplaceTempView(OBSERVATION)
     observation_events = spark.sql(
         """
-        SELECT DISTINCT
-            o.person_id,
-            o.observation_concept_id AS standard_concept_id,
-            CAST(o.observation_date AS DATE) AS date,
+        SELECT DISTINCT o.person_id,
+                        o.observation_concept_id AS standard_concept_id,
+                        CAST(o.observation_date AS DATE) AS date,
             CAST(COALESCE(o.observation_datetime, o.observation_date) AS TIMESTAMP) AS datetime,
             o.visit_occurrence_id AS visit_occurrence_id,
             'observation' AS domain,
@@ -1167,9 +1222,9 @@ def get_observation_events(
             CAST(o.value_as_concept_id AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, o.unit_source_value, 'N/A') AS unit
         FROM observation AS o
-        LEFT JOIN concept AS c
-            ON o.unit_concept_id = c.concept_id
-    """
+            LEFT JOIN concept AS c
+        ON o.unit_concept_id = c.concept_id
+        """
     )
     numeric_events = observation_events.where(F.col("number_as_value").isNotNull())
     numeric_events = clean_up_unit(numeric_events)
@@ -1225,10 +1280,9 @@ def get_device_events(
     device_exposure.createOrReplaceTempView(DEVICE_EXPOSURE)
     device_events = spark.sql(
         """
-        SELECT DISTINCT
-            d.person_id,
-            d.device_concept_id AS standard_concept_id,
-            CAST(d.device_exposure_start_date AS DATE) AS date,
+        SELECT DISTINCT d.person_id,
+                        d.device_concept_id AS standard_concept_id,
+                        CAST(d.device_exposure_start_date AS DATE) AS date,
             CAST(COALESCE(d.device_exposure_start_datetime, d.device_exposure_start_date) AS TIMESTAMP) AS datetime,
             d.visit_occurrence_id AS visit_occurrence_id,
             'device' AS domain,
@@ -1237,8 +1291,8 @@ def get_device_events(
             CAST(NULL AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, d.unit_source_value, 'N/A') AS unit
         FROM device_exposure AS d
-        LEFT JOIN concept AS c
-            ON d.unit_concept_id = c.concept_id
+            LEFT JOIN concept AS c
+        ON d.unit_concept_id = c.concept_id
         """
     )
     numeric_events = device_events.where(F.col("number_as_value").isNotNull())
