@@ -222,27 +222,25 @@ def extract_events_by_domain(
                     domain_records["condition_source_concept_id"] == concept["concept_id"],
                     "left_outer",
                 ).withColumn(
-                    concept_id_field,
-                    F.explode(
-                        F.split(
-                            F.when(
-                                F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
-                                F.col("concept_code"),
-                            ).otherwise(
-                                F.col(concept_id_field)
-                            ),
-                            "\\."  # Escape the dot for regex
-                        )
-                    ),
+                    concept_id_field + "_array",
+                    F.when(
+                        F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
+                        F.split(F.col("concept_code"), "\\.")
+                    ).otherwise(
+                        F.array(F.col(concept_id_field))
+                    )
+                ).drop(concept_id_field).select(
+                    "*",
+                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
                     concept_id_field,
                     F.when(
                         F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col(concept_id_field)),
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
                     ).otherwise(
                         F.col(concept_id_field)
                     )
-                )
+                ).drop(concept_id_field + "_array")
 
             elif domain_table_name.startswith("procedure"):
                 domain_records = domain_records.join(
@@ -257,18 +255,18 @@ def extract_events_by_domain(
                     ).otherwise(
                         F.array(F.col(concept_id_field))
                     )
+                ).drop(concept_id_field).select(
+                    "*",
+                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
-                    concept_id_field,
-                    F.explode(F.col(concept_id_field + "_array"))
-                ).drop(concept_id_field + "_array").withColumn(
                     concept_id_field,
                     F.when(
                         F.col("vocabulary_id") == "ICD10PCS",
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col(concept_id_field)),
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
                     ).otherwise(
                         F.col(concept_id_field)
                     )
-                )
+                ).drop(concept_id_field + "_array")
 
             domain_records = domain_records.select(
                 domain_records["person_id"],
@@ -595,8 +593,7 @@ def create_sequence_data_with_att(
             "priority",
             "datetime",
             "event_group_id",
-            # This is for the ICD10/9 parts to be in the right order
-            F.desc("standard_concept_id"),
+            "standard_concept_id",
         )
     )
 
@@ -749,9 +746,12 @@ def construct_artificial_visits(
     )
 
     if disconnect_problem_list_records:
+        visit_columns = ["visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"]
+        if not "visit_concept_id" in patient_events.columns:
+            visit_columns.append("visit_concept_id")
         # Set visit_occurrence_id to None if the event datetime is outside the visit start and visit end
         updated_patient_events = patient_events.join(
-            visit.select("visit_occurrence_id", "visit_start_lower_bound", "visit_end_upper_bound"),
+            visit.select(visit_columns),
             "visit_occurrence_id",
             "left_outer"
         ).withColumn(
