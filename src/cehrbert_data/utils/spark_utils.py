@@ -44,7 +44,7 @@ DOMAIN_KEY_FIELDS = {
             "condition_concept_id",
             "condition_start_date",
             "condition_start_datetime",
-            "condition"
+            "condition_occurrence"
         )
     ],
     "procedure_occurrence_id": [
@@ -52,7 +52,7 @@ DOMAIN_KEY_FIELDS = {
             "procedure_concept_id",
             "procedure_date",
             "procedure_datetime",
-            "procedure"
+            "procedure_occurrence"
         )
     ],
     "drug_exposure_id": [
@@ -60,7 +60,7 @@ DOMAIN_KEY_FIELDS = {
             "drug_concept_id",
             "drug_exposure_start_date",
             "drug_exposure_start_datetime",
-            "drug"
+            "drug_exposure"
         )
     ],
     "measurement_id": [
@@ -84,13 +84,13 @@ DOMAIN_KEY_FIELDS = {
             "device_concept_id",
             "device_exposure_start_date",
             "device_exposure_start_datetime",
-            "device"
+            "device_exposure"
         )
     ],
     "death_date": [("cause_concept_id", "death_date", "death_datetime", "death")],
     "visit_concept_id": [
-        ("visit_concept_id", "visit_start_date", "visit"),
-        ("discharged_to_concept_id", "visit_end_date", "visit"),
+        ("visit_concept_id", "visit_start_date", "visit_occurrence"),
+        ("discharged_to_concept_id", "visit_end_date", "visit_occurrence"),
     ],
 }
 
@@ -180,7 +180,7 @@ def extract_events_by_domain(
     ) in get_key_fields(domain_table):
 
         if is_domain_numeric(domain_table_name):
-            concept = kwargs.get("concept")
+            concept: DataFrame = kwargs.get("concept")
             spark = kwargs.get("spark", None)
             persistence_folder = kwargs.get("persistence_folder", None)
             refresh = kwargs.get("refresh_measurement", False)
@@ -210,7 +210,7 @@ def extract_events_by_domain(
             domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
                 F.col(concept_id_field).isNotNull()
             )
-            datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field), "yyyy-MM-dd HH:mm:ss")
+            datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field))
             domain_records = (
                 domain_records.where(F.col(concept_id_field).cast("string") != "0")
                 .withColumn("date", F.to_date(F.col(date_field)))
@@ -222,16 +222,12 @@ def extract_events_by_domain(
                 domain_records["date"].cast("date"),
                 domain_records["datetime"].cast(T.TimestampType()),
                 domain_records["visit_occurrence_id"],
-                F.lit(domain_table_name).alias("domain"),
+                F.lit(domain_table_name.split("_")[0]).alias("domain"),
                 F.lit(None).cast("string").alias("event_group_id"),
                 F.lit(None).cast("float").alias("number_as_value"),
                 F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(domain_records) else F.lit(NA).alias("unit"),
             ).distinct()
-
-            # Remove "Patient Died" from condition_occurrence
-            if domain_table_name == "condition_occurrence":
-                domain_records = domain_records.where("condition_concept_id != 4216643")
 
         if ehr_events is None:
             ehr_events = domain_records
