@@ -9,7 +9,12 @@ class CleanUpUnitTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Initialize the Spark session for testing
-        cls.spark = SparkSession.builder.appName("UnitTest").getOrCreate()
+        cls.spark = (
+            SparkSession.builder
+            .appName("UnitTest")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate()
+        )
 
     @classmethod
     def tearDownClass(cls):

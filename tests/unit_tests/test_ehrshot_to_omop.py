@@ -21,7 +21,12 @@ class EHRShotUnitTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Initialize the Spark session for testing
-        cls.spark = SparkSession.builder.appName("ehr_shot").getOrCreate()
+        cls.spark = (
+            SparkSession.builder
+            .appName("ehr_shot")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate()
+        )
         cls.spark.conf.set("spark.sql.analyzer.failAmbiguousSelfJoin", False)
 
     @classmethod

@@ -31,7 +31,13 @@ class PySparkAbstract(unittest.TestCase, ABC):
         # Add JVM Options: If you must use a newer version of Java, you can try adding JVM options to open up the
         # necessary modules. This is done by adding arguments to the spark.driver.extraJavaOptions and
         # spark.executor.extraJavaOptions in your Spark configuration:
-        self.spark = SparkSession.builder.master("local").appName("test").getOrCreate()
+        self.spark = (
+            SparkSession.builder
+            .master("local")
+            .appName("test")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate()
+        )
 
         # Get the root folder of the project
         root_folder = Path(os.path.abspath(__file__)).parent.parent

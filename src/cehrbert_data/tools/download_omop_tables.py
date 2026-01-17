@@ -107,7 +107,12 @@ if __name__ == "__main__":
     )
 
     ARGS = parser.parse_args()
-    spark = SparkSession.builder.appName("Download OMOP tables").getOrCreate()
+    spark = (
+        SparkSession.builder
+        .appName("Download OMOP tables")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
     domain_table_list = ARGS.domain_table_list
     credential_path = ARGS.credential_path
     download_folder = ARGS.output_folder

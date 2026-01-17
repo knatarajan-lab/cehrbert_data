@@ -53,7 +53,12 @@ def main(
     The function processes patient event data across various domain tables, excludes low-frequency
     concepts, and saves the filtered concepts to a specified output folder.
     """
-    spark = SparkSession.builder.appName("Generate concept list").getOrCreate()
+    spark = (
+        SparkSession.builder
+        .appName("Generate concept list")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
 
     # Exclude measurement from domain_table_list if exists because we need to process measurement
     # in a different way

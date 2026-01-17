@@ -137,7 +137,12 @@ class BaseCohortBuilder(ABC):
         # Validate if the data folders exist
         validate_date_folder(self._input_folder, self._query_builder.get_dependency_list())
 
-        self.spark = SparkSession.builder.appName(f"Generate {self._query_builder.get_cohort_name()}").getOrCreate()
+        self.spark = (
+            SparkSession.builder
+            .appName(f"Generate {self._query_builder.get_cohort_name()}")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate()
+        )
 
         self._dependency_dict = instantiate_dependencies(
             self.spark, self._input_folder, self._query_builder.get_dependency_list()
@@ -409,7 +414,12 @@ class NestedCohortBuilder:
             f"disconnect_problem_list_records: {disconnect_problem_list_records}\n"
         )
 
-        self.spark = SparkSession.builder.appName(f"Generate {self._cohort_name}").getOrCreate()
+        self.spark = (
+            SparkSession.builder
+            .appName(f"Generate {self._cohort_name}")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate()
+        )
         self._dependency_dict = instantiate_dependencies(self.spark, self._input_folder, DEFAULT_DEPENDENCY)
 
         # Validate the input and output folders

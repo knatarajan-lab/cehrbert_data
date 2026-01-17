@@ -64,9 +64,12 @@ def main(args):
     cohort_path = Path(args.cohort_dir)
     if not cohort_path.exists():
         raise ValueError(f"{args.cohort_dir} does not exist!")
-    spark = SparkSession.builder.appName(
-        f"Extract Features for existing cohort {args.cohort_name}"
-    ).getOrCreate()
+    spark = (
+        SparkSession.builder
+        .appName(f"Extract Features for existing cohort {args.cohort_name}")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
     spark.conf.set(
         "spark.sql.legacy.parquet.int96RebaseModeInWrite",
         "CORRECTED"
