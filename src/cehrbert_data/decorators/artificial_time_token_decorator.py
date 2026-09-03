@@ -86,6 +86,7 @@ class AttEventDecorator(PatientEventDecorator):
                 F.col("visit_start_date").cast(T.DateType()).alias("visit_start_date"),
                 F.col("visit_start_datetime").cast(T.TimestampType()).alias("visit_start_datetime"),
                 F.coalesce("visit_end_date", "visit_start_date").cast(T.DateType()).alias("visit_end_date"),
+                F.coalesce("visit_end_datetime", "visit_start_datetime").cast(T.TimestampType()).alias("visit_end_datetime"),
                 "visit_concept_id",
                 "visit_occurrence_id",
                 F.lit("visit").alias("domain"),
@@ -111,6 +112,13 @@ class AttEventDecorator(PatientEventDecorator):
                 F.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
                 F.col("visit_end_date"),
             ).otherwise(F.col("visit_start_date")),
+        )
+        visit_occurrence = visit_occurrence.withColumn(
+            "visit_end_datetime",
+            F.when(
+                F.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
+                F.col("visit_end_datetime"),
+            ).otherwise(F.col("visit_start_datetime")),
         )
 
         weeks_since_epoch_udf = (F.unix_timestamp("date") / F.lit(24 * 60 * 60 * 7)).cast("int")
@@ -225,7 +233,7 @@ class AttEventDecorator(PatientEventDecorator):
             )
             artificial_tokens = artificial_tokens.unionByName(visit_type_tokens)
 
-        artificial_tokens = artificial_tokens.drop("visit_end_date")
+        artificial_tokens = artificial_tokens.drop("visit_end_date", "visit_end_datetime")
 
         # Try persisting artificial events
         artificial_tokens = self.try_persist_data(
@@ -280,7 +288,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("priority", F.lit(DISCHARGE_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .drop("discharged_to_concept_id", "visit_end_date")
+            .drop("discharged_to_concept_id", "visit_end_date", "visit_end_datetime")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
         )
