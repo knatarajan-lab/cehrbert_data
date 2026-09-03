@@ -71,6 +71,7 @@ def main(args):
         "spark.sql.legacy.parquet.int96RebaseModeInWrite",
         "CORRECTED"
     )
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
 
     cohort_dir = os.path.expanduser(args.cohort_dir)
     is_parquet = False

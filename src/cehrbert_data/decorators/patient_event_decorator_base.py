@@ -15,6 +15,7 @@ class AttType(Enum):
     CEHR_BERT = "cehr_bert"
     MIX = "mix"
     ETHOS = "ethos"
+    COMET = "comet"
     NONE = "none"
 
 
@@ -215,6 +216,6 @@ def get_att_function(att_type: Union[AttType, str]) -> Callable:
         return time_mix_token
     elif att_type == AttType.CEHR_BERT:
         return time_token_func
-    elif att_type == AttType.ETHOS:
+    elif att_type in (AttType.ETHOS, AttType.COMET):
         return ethos_time_token_func
     return None

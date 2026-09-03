@@ -54,12 +54,25 @@ def main(
         duplicate_records: bool = False,
         disconnect_problem_list_records: bool = False,
 ):
-    spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
+    spark = (
+        SparkSession.builder.appName("Generate CEHR-BERT Training Data")
+        .config("spark.sql.session.timeZone", "UTC")
+        .getOrCreate()
+    )
 
     is_ethos = att_type == AttType.ETHOS
-    with_diagnosis_rollup = is_ethos
+    is_comet = att_type == AttType.COMET
+    # ETHOS/CoMET split condition/procedure source codes into multi-part tokens (e.g. ICD10CM/0/I21,
+    # ICD10CM/1/9), which requires the full, un-rolled-up source code. Rolling diagnoses/procedures
+    # up to their 3-digit parent first would collapse the decimal part and defeat that splitting,
+    # so this must stay off for both.
+    with_diagnosis_rollup = False
+    # Both ETHOS and CoMET represent drugs at the RxNorm ingredient level: ETHOS further maps
+    # ingredients to ATC and splits the ATC code, while CoMET keeps the RxNorm ingredient
+    # concept as a single, unsplit token (with_atc_rollup stays off for CoMET).
+    with_drug_rollup = with_drug_rollup or is_ethos or is_comet
     with_atc_rollup = is_ethos
-    use_value_bins = is_ethos
+    use_value_bins = is_ethos or is_comet
 
     logger = logging.getLogger(__name__)
     logger.info(
@@ -111,7 +124,7 @@ def main(
             spark=spark,
             concept=concept,
             aggregate_by_hour=aggregate_by_hour,
-            refresh=refresh_measurement,
+            refresh_measurement=refresh_measurement,
             persistence_folder=input_folder,
             use_value_bins=use_value_bins,
         )
@@ -130,7 +143,6 @@ def main(
         "person_id",
         "discharged_to_concept_id",
     )
-
 
     person = preprocess_domain_table(spark, input_folder, PERSON)
     birth_datetime_udf = F.coalesce("birth_datetime", F.concat("year_of_birth", F.lit("-01-01")).cast("timestamp"))

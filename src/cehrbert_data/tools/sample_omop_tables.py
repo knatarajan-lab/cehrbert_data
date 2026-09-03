@@ -23,6 +23,7 @@ def main(args):
         .config("spark.sql.legacy.parquet.int96RebaseModeInWrite", "CORRECTED")
         .config("spark.sql.legacy.parquet.datetimeRebaseModeInRead", "CORRECTED")
         .config("spark.sql.legacy.parquet.datetimeRebaseModeInWrite", "CORRECTED")
+        .config("spark.sql.session.timeZone", "UTC")
         .getOrCreate()
     )
     patient_sample = spark.read.parquet(args.person_sample)

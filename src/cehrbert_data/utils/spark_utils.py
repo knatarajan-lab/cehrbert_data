@@ -1178,9 +1178,12 @@ def add_measurement_value_bins(numeric_events: DataFrame, num_bins: int = 10) ->
 
     For each (standard_concept_id, unit) pair, values are split into `num_bins`
     equal-frequency buckets using ntile.  A second row is created per measurement
-    with standard_concept_id set to "MBIN/{concept_id}/{unit}/{bin}" (0-indexed)
-    and number_as_value set to NULL, sharing the same event_group_id as the
-    original measurement token so the two tokens are treated as co-occurring.
+    with standard_concept_id set to "VALUE_BIN/{bin}" (0-indexed) and number_as_value
+    set to NULL, sharing the same event_group_id as the original measurement
+    token so the two tokens are treated as co-occurring. The bin is computed
+    per (concept_id, unit) pair, but the concept_id/unit are not included in
+    the token itself since the preceding concept token already conveys that
+    context.
     """
     bin_window = W.partitionBy("standard_concept_id", "unit").orderBy("number_as_value")
     events_with_bin = numeric_events.withColumn(
@@ -1192,11 +1195,7 @@ def add_measurement_value_bins(numeric_events: DataFrame, num_bins: int = 10) ->
     bin_events = events_with_bin.withColumn(
         "standard_concept_id",
         F.concat(
-            F.lit("MBIN/"),
-            F.col("standard_concept_id"),
-            F.lit("/"),
-            F.col("unit"),
-            F.lit("/"),
+            F.lit("VALUE_BIN/"),
             F.col("value_bin"),
         ),
     ).withColumn(

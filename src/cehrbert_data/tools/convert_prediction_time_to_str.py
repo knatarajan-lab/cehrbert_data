@@ -26,9 +26,10 @@ def convert_file(file_pair):
         # Read with Polars
         df = pl.read_parquet(input_file)
 
-        # Convert datetime to string (ISO format)
+        # Convert datetime to string (ISO format) in UTC to avoid timezone issues
         df = df.with_columns([
             pl.col("prediction_time")
+            .dt.convert_time_zone("UTC")
             .cast(pl.Datetime("us"))
             .dt.strftime("%Y-%m-%d %H:%M:%S.%f")
             .alias("prediction_time")

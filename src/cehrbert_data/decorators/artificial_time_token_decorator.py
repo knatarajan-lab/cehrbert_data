@@ -165,8 +165,8 @@ class AttEventDecorator(PatientEventDecorator):
         # Udf for calculating the time token
         time_token_udf = F.udf(get_att_function(self._att_type), T.StringType())
 
-        if self._att_type == AttType.ETHOS:
-            # ETHOS tokens are minute-resolution — use datetimes for the lag and delta
+        if self._att_type in (AttType.ETHOS, AttType.COMET):
+            # ETHOS/CoMET tokens are minute-resolution — use datetimes for the lag and delta
             prev_visit_end_col = F.lag("visit_end_datetime").over(
                 W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
             )
@@ -375,7 +375,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("event_group_id", F.lit(NA))
                 .drop("min_visit_concept_order", "max_visit_concept_order")
                 .drop("min_concept_order", "max_concept_order")
-                .drop("hour_delta", "visit_end_date")
+                .drop("hour_delta", "visit_end_date", "visit_end_datetime")
             )
 
             # We calculate the hour difference between groups of events if they occur on the same day.
