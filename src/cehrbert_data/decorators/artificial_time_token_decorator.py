@@ -154,24 +154,34 @@ class AttEventDecorator(PatientEventDecorator):
             .drop("min_concept_order", "max_concept_order")
         )
 
-        # Get the prev days_since_epoch
-        prev_visit_end_date_udf = F.lag("visit_end_date").over(
-            W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
-        )
-
-        # Compute the time difference between the current record and the previous record
-        time_delta_udf = F.when(F.col("prev_visit_end_date").isNull(), 0).otherwise(
-            F.datediff("visit_start_date", "prev_visit_end_date")
-        )
-
         # Udf for calculating the time token
         time_token_udf = F.udf(get_att_function(self._att_type), T.StringType())
 
+        if self._att_type == AttType.ETHOS:
+            # ETHOS tokens are minute-resolution — use datetimes for the lag and delta
+            prev_visit_end_col = F.lag("visit_end_datetime").over(
+                W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
+            )
+            time_delta_col = F.when(F.col("prev_visit_end_datetime").isNull(), 0).otherwise(
+                ((F.unix_timestamp("visit_start_datetime") - F.unix_timestamp("prev_visit_end_datetime")) / 60
+                 ).cast("int")
+            )
+            prev_col_name = "prev_visit_end_datetime"
+        else:
+            # All other ATT types use day-resolution
+            prev_visit_end_col = F.lag("visit_end_date").over(
+                W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
+            )
+            time_delta_col = F.when(F.col("prev_visit_end_date").isNull(), 0).otherwise(
+                F.datediff("visit_start_date", "prev_visit_end_date")
+            )
+            prev_col_name = "prev_visit_end_date"
+
         att_tokens = (
             visits.withColumn("datetime", F.to_timestamp("date"))
-            .withColumn("prev_visit_end_date", prev_visit_end_date_udf)
-            .where(F.col("prev_visit_end_date").isNotNull())
-            .withColumn("time_delta", time_delta_udf)
+            .withColumn(prev_col_name, prev_visit_end_col)
+            .where(F.col(prev_col_name).isNotNull())
+            .withColumn("time_delta", time_delta_col)
             .withColumn(
                 "time_delta",
                 F.when(F.col("time_delta") < 0, F.lit(0)).otherwise(F.col("time_delta")),
@@ -183,7 +193,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("concept_order", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .drop("prev_visit_end_date", "time_delta")
+            .drop(prev_col_name, "time_delta")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
         )

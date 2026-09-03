@@ -153,33 +153,51 @@ def time_mix_token(time_delta: int) -> Optional[str]:
     return "LT"
 
 
-def ethos_time_token_func(time_delta: int) -> Optional[str]:
-    if time_delta is None or np.isnan(time_delta):
+def ethos_time_token_func(time_delta_minutes: int) -> Optional[str]:
+    """Map a time delta (in minutes) to an ETHOS time-interval token.
+
+    Bucket boundaries (all in minutes):
+        < 15       -> 5m-15m
+        < 60       -> 15m-1h
+        < 120      -> 1h-2h
+        < 360      -> 2h-6h
+        < 720      -> 6h-12h
+        < 1440     -> 12h-1d
+        < 4320     -> 1d-3d
+        < 10080    -> 3d-1w
+        < 20160    -> 1w-2w
+        < 43200    -> 2w-1mt
+        < 129600   -> 1mt-3mt
+        < 259200   -> 3mt-6mt
+        >= 259200  -> >=6mt
+    """
+    if time_delta_minutes is None or np.isnan(time_delta_minutes):
         return None
-    if time_delta <= 2:
-        return f"D1"
-    if time_delta <= 4:
-        # e.g. 8 -> W2
-        return f"D2"
-    if time_delta <= 7:
-        # e.g. 31 -> M2
-        return f"D4"
-    if time_delta <= 12:
-        # e.g. 31 -> M2
-        return f"D7"
-    if time_delta <= 20:
-        # e.g. 31 -> M2
-        return f"D12"
-    if time_delta <= 30:
-        # e.g. 31 -> M2
-        return f"D20"
-    if time_delta <= 60:
-        # e.g. 31 -> M2
-        return f"D30"
-    if time_delta <= 180:
-        # e.g. 31 -> M2
-        return f"D60"
-    return "D100"
+    if time_delta_minutes < 15:
+        return "5m-15m"
+    if time_delta_minutes < 60:
+        return "15m-1h"
+    if time_delta_minutes < 120:
+        return "1h-2h"
+    if time_delta_minutes < 360:
+        return "2h-6h"
+    if time_delta_minutes < 720:
+        return "6h-12h"
+    if time_delta_minutes < 1440:
+        return "12h-1d"
+    if time_delta_minutes < 4320:
+        return "1d-3d"
+    if time_delta_minutes < 10080:
+        return "3d-1w"
+    if time_delta_minutes < 20160:
+        return "1w-2w"
+    if time_delta_minutes < 43200:
+        return "2w-1mt"
+    if time_delta_minutes < 129600:
+        return "1mt-3mt"
+    if time_delta_minutes < 259200:
+        return "3mt-6mt"
+    return ">=6mt"
 
 
 def get_att_function(att_type: Union[AttType, str]) -> Callable:
