@@ -56,6 +56,11 @@ def main(
 ):
     spark = SparkSession.builder.appName("Generate CEHR-BERT Training Data").getOrCreate()
 
+    is_ethos = att_type == AttType.ETHOS
+    with_diagnosis_rollup = is_ethos
+    with_atc_rollup = is_ethos
+    use_value_bins = is_ethos
+
     logger = logging.getLogger(__name__)
     logger.info(
         f"input_folder: {input_folder}\n"
@@ -75,6 +80,8 @@ def main(
         f"exclude_demographic: {exclude_demographic}\n"
         f"use_age_group: {use_age_group}\n"
         f"with_drug_rollup: {with_drug_rollup}\n"
+        f"with_atc_rollup: {with_atc_rollup}\n"
+        f"use_value_bins: {use_value_bins}\n"
         f"refresh_measurement: {refresh_measurement}\n"
         f"aggregate_by_hour: {aggregate_by_hour}\n"
         f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
@@ -91,7 +98,9 @@ def main(
             spark=spark,
             input_folder=input_folder,
             domain_table_name=domain_table_name,
-            with_drug_rollup=with_drug_rollup
+            with_drug_rollup=with_drug_rollup,
+            with_diagnosis_rollup=with_diagnosis_rollup,
+            with_atc_rollup=with_atc_rollup,
         )
         domain_table = invalidate_visit_id(
             domain_table,
@@ -103,7 +112,8 @@ def main(
             concept=concept,
             aggregate_by_hour=aggregate_by_hour,
             refresh=refresh_measurement,
-            persistence_folder=input_folder
+            persistence_folder=input_folder,
+            use_value_bins=use_value_bins,
         )
         if patient_ehr_events is None:
             patient_ehr_events = ehr_events

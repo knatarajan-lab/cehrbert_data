@@ -35,7 +35,7 @@ from cehrbert_data.decorators import (
     time_token_func,
 )
 
-from cehrbert_data.utils.vocab_utils import roll_up_to_drug_ingredients, roll_up_diagnosis, roll_up_procedure
+from cehrbert_data.utils.vocab_utils import roll_up_to_drug_ingredients, roll_up_diagnosis, roll_up_procedure, map_to_atc_codes
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
@@ -184,6 +184,7 @@ def extract_events_by_domain(
             persistence_folder = kwargs.get("persistence_folder", None)
             refresh = kwargs.get("refresh_measurement", False)
             aggregate_by_hour = kwargs.get("aggregate_by_hour", False)
+            use_value_bins = kwargs.get("use_value_bins", False)
 
             if domain_table_name == MEASUREMENT:
                 get_events_func = get_measurement_events
@@ -194,13 +195,18 @@ def extract_events_by_domain(
             else:
                 raise RuntimeError("Cannot extract events by domain table")
 
+            extra_kwargs = {}
+            if domain_table_name == MEASUREMENT:
+                extra_kwargs["use_value_bins"] = use_value_bins
+
             domain_records = get_events_func(
                 domain_table,
                 concept=concept,
                 refresh=refresh,
                 spark=spark,
                 persistence_folder=persistence_folder,
-                aggregate_by_hour=aggregate_by_hour
+                aggregate_by_hour=aggregate_by_hour,
+                **extra_kwargs
             )
             # Filter out the zero concept numeric events
             domain_records = domain_records.where(F.col("standard_concept_id") != "0")
@@ -268,6 +274,51 @@ def extract_events_by_domain(
                     )
                 ).drop(concept_id_field + "_array")
 
+            elif domain_table_name.startswith("drug"):
+                @F.udf(returnType=T.ArrayType(T.StringType()))
+                def split_atc_code(code):
+                    """Split an ATC code into 1-3 hierarchical tokens.
+
+                    Examples:
+                        A10BA02 -> ['A10', 'B', 'A02']   (levels 2, 3, 4-5)
+                        A10B    -> ['A10', 'B']           (levels 2, 3)
+                        A10     -> ['A10']                (level 2)
+                        A       -> ['A']                  (level 1)
+                    """
+                    if code is None:
+                        return None
+                    tokens = [code[:3]]          # Level 1-2 (first 3 chars)
+                    if len(code) > 3:
+                        tokens.append(code[3])   # Level 3 (one char)
+                    if len(code) > 4:
+                        tokens.append(code[4:])  # Level 4-5 (remaining)
+                    return tokens
+
+                domain_records = domain_records.join(
+                    concept.select("concept_id", "vocabulary_id", "concept_code"),
+                    domain_records["drug_source_concept_id"] == concept["concept_id"],
+                    "left_outer",
+                ).withColumn(
+                    concept_id_field + "_array",
+                    F.when(
+                        F.col("vocabulary_id") == "ATC",
+                        split_atc_code(F.col("concept_code"))
+                    ).otherwise(
+                        F.array(F.col(concept_id_field))
+                    )
+                ).drop(concept_id_field).select(
+                    "*",
+                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                ).withColumn(
+                    concept_id_field,
+                    F.when(
+                        F.col("vocabulary_id") == "ATC",
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
+                    ).otherwise(
+                        F.col(concept_id_field)
+                    )
+                ).drop(concept_id_field + "_array")
+
             domain_records = domain_records.select(
                 domain_records["person_id"],
                 domain_records[concept_id_field].alias("standard_concept_id"),
@@ -295,6 +346,7 @@ def preprocess_domain_table(
         domain_table_name,
         with_diagnosis_rollup=False,
         with_drug_rollup=True,
+        with_atc_rollup=False,
 ):
     domain_table = spark.read.parquet(os.path.join(input_folder, domain_table_name))
     if "concept" in domain_table_name.lower():
@@ -326,6 +378,16 @@ def preprocess_domain_table(
             concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
             domain_table = roll_up_to_drug_ingredients(domain_table, concept, concept_ancestor)
 
+    if with_atc_rollup:
+        if (
+                domain_table_name == "drug_exposure"
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
+        ):
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            domain_table = map_to_atc_codes(domain_table, concept, concept_relationship)
+
     if with_diagnosis_rollup:
         if (
                 domain_table_name == "condition_occurrence"
@@ -339,7 +401,7 @@ def preprocess_domain_table(
         if (
                 domain_table_name == "procedure_occurrence"
                 and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_ancestor"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
         ):
             concept = spark.read.parquet(os.path.join(input_folder, "concept"))
             concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
@@ -905,6 +967,8 @@ def extract_ehr_records(
         include_visit_type: bool = False,
         with_diagnosis_rollup: bool = False,
         with_drug_rollup: bool = False,
+        with_atc_rollup: bool = False,
+        use_value_bins: bool = False,
         include_concept_list: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = False,
@@ -934,7 +998,8 @@ def extract_ehr_records(
             input_folder=input_folder,
             domain_table_name=domain_table_name,
             with_diagnosis_rollup=with_diagnosis_rollup,
-            with_drug_rollup=with_drug_rollup
+            with_drug_rollup=with_drug_rollup,
+            with_atc_rollup=with_atc_rollup,
         )
 
         domain_table = invalidate_visit_id(
@@ -948,7 +1013,8 @@ def extract_ehr_records(
             concept=concept,
             aggregate_by_hour=aggregate_by_hour,
             refresh=refresh_measurement,
-            persistence_folder=input_folder
+            persistence_folder=input_folder,
+            use_value_bins=use_value_bins,
         )
         if patient_ehr_records is None:
             patient_ehr_records = ehr_events
@@ -1107,6 +1173,42 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
     )
 
 
+def add_measurement_value_bins(numeric_events: DataFrame, num_bins: int = 10) -> DataFrame:
+    """Expand each numeric measurement into two tokens: the concept token and a value-bin token.
+
+    For each (standard_concept_id, unit) pair, values are split into `num_bins`
+    equal-frequency buckets using ntile.  A second row is created per measurement
+    with standard_concept_id set to "MBIN/{concept_id}/{unit}/{bin}" (0-indexed)
+    and number_as_value set to NULL, sharing the same event_group_id as the
+    original measurement token so the two tokens are treated as co-occurring.
+    """
+    bin_window = W.partitionBy("standard_concept_id", "unit").orderBy("number_as_value")
+    events_with_bin = numeric_events.withColumn(
+        "value_bin",
+        (F.ntile(num_bins).over(bin_window) - 1).cast("string"),
+    )
+
+    # Value-bin token rows
+    bin_events = events_with_bin.withColumn(
+        "standard_concept_id",
+        F.concat(
+            F.lit("MBIN/"),
+            F.col("standard_concept_id"),
+            F.lit("/"),
+            F.col("unit"),
+            F.lit("/"),
+            F.col("value_bin"),
+        ),
+    ).withColumn(
+        "number_as_value", F.lit(None).cast("float")
+    ).drop("value_bin")
+
+    # Original measurement token rows (drop the helper column)
+    original_events = events_with_bin.drop("value_bin")
+
+    return original_events.unionByName(bin_events)
+
+
 def get_measurement_events(
         measurement: DataFrame,
         concept: DataFrame,
@@ -1114,6 +1216,7 @@ def get_measurement_events(
         refresh: bool = False,
         spark: SparkSession = None,
         persistence_folder: str = None,
+        use_value_bins: bool = False,
 ) -> DataFrame:
     """
     Extract medical events from the measurement table
@@ -1168,6 +1271,9 @@ def get_measurement_events(
         ).withColumn(
             "event_group_id", F.lit(None).cast("string")
         ).drop("lab_hour")
+
+    if use_value_bins:
+        numeric_events = add_measurement_value_bins(numeric_events)
 
     measurement_events = numeric_events.unionByName(non_numeric_events)
     if spark and persistence_folder:

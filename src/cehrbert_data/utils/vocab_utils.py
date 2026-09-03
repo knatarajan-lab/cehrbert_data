@@ -114,6 +114,61 @@ def roll_up_to_drug_ingredients(drug_exposure, concept, concept_ancestor):
     return drug_exposure
 
 
+def map_to_atc_codes(drug_exposure, concept, concept_relationship):
+    """Map drug ingredient concepts to ATC codes via concept_relationship.
+
+    The ATC concept_id is stored in drug_source_concept_id so that
+    extract_events_by_domain can join against the concept table to retrieve
+    the ATC concept_code for hierarchical splitting.
+
+    An ingredient may map to multiple ATC codes; we keep the single most
+    specific mapping (lowest concept_id as a deterministic tie-breaker).
+    """
+    # lowercase the schema fields
+    drug_exposure = drug_exposure.select(
+        [F.col(f_n).alias(f_n.lower()) for f_n in drug_exposure.schema.fieldNames()]
+    )
+
+    atc_concept = concept.where(F.col("vocabulary_id") == "ATC")
+
+    # ATC - RxNorm pr lat: concept_id_1 is ATC, concept_id_2 is RxNorm
+    atc_mapping = (
+        drug_exposure.select("drug_concept_id")
+        .distinct()
+        .join(
+            concept_relationship.where(F.col("relationship_id") == "ATC - RxNorm pr lat"),
+            F.col("drug_concept_id") == F.col("concept_id_2"),
+        )
+        .join(atc_concept, F.col("concept_id_1") == atc_concept["concept_id"])
+        .select(
+            F.col("drug_concept_id"),
+            atc_concept["concept_id"].alias("atc_concept_id"),
+        )
+        # When multiple ATC codes exist for one ingredient, pick lowest concept_id
+        .groupBy("drug_concept_id")
+        .agg(F.min("atc_concept_id").alias("atc_concept_id"))
+    )
+
+    drug_source_fields = [
+        F.coalesce(F.col("atc_concept_id"), F.col("drug_source_concept_id")).alias(
+            "drug_source_concept_id"
+        )
+    ]
+    drug_source_fields.extend(
+        [
+            F.col(f_n)
+            for f_n in drug_exposure.schema.fieldNames()
+            if f_n != "drug_source_concept_id"
+        ]
+    )
+
+    drug_exposure = drug_exposure.join(atc_mapping, "drug_concept_id", "left_outer").select(
+        drug_source_fields
+    )
+
+    return drug_exposure
+
+
 def roll_up_diagnosis(condition_occurrence, concept, concept_relationship):
     list_3dig_code = [
         "3-char nonbill code",
