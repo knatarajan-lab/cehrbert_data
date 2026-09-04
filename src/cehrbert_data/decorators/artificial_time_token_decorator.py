@@ -317,10 +317,21 @@ class AttEventDecorator(PatientEventDecorator):
             W.partitionBy("cohort_member_id", "visit_occurrence_id").orderBy("concept_order")
         )
 
-        # Compute the date difference in terms of number of days between the current record and the previous record
-        inpatient_date_delta_udf = F.when(F.col("prev_date").isNull(), 0).otherwise(
-            F.datediff("date", "prev_date")
+        # Get the prev datetime for minute-resolution ETHOS/CoMET time delta computation
+        inpatient_prev_datetime_udf = F.lag("datetime").over(
+            W.partitionBy("cohort_member_id", "visit_occurrence_id").orderBy("concept_order")
         )
+
+        # Compute the date difference in terms of number of days between the current record and the previous record
+        # For ETHOS/CoMET, compute the delta in minutes instead, since ethos_time_token_func expects minutes
+        if self._inpatient_att_type in (AttType.ETHOS, AttType.COMET):
+            inpatient_date_delta_udf = F.when(F.col("prev_datetime").isNull(), 0).otherwise(
+                (F.unix_timestamp("datetime") - F.unix_timestamp("prev_datetime")) / F.lit(60)
+            )
+        else:
+            inpatient_date_delta_udf = F.when(F.col("prev_date").isNull(), 0).otherwise(
+                F.datediff("date", "prev_date")
+            )
 
         # Create ATT tokens within the inpatient visits between groups of events that occur on different dates
         inpatient_att_events = (
@@ -332,6 +343,7 @@ class AttEventDecorator(PatientEventDecorator):
             )
             .where(F.col("is_span_boundary") == 1)
             .withColumn("prev_date", inpatient_prev_date_udf)
+            .withColumn("prev_datetime", inpatient_prev_datetime_udf)
             .withColumn("date_delta", inpatient_date_delta_udf)
             .where(F.col("date_delta") != 0)
             .where(F.col("prev_date").isNotNull())
@@ -347,7 +359,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("is_numeric_type", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .drop("prev_date", "date_delta", "is_span_boundary")
+            .drop("prev_date", "prev_datetime", "date_delta", "is_span_boundary")
         )
 
         if self._include_inpatient_hour_token:
