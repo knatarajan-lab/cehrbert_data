@@ -169,6 +169,116 @@ def map_to_atc_codes(drug_exposure, concept, concept_relationship):
     return drug_exposure
 
 
+def _build_vocab_crosswalk(concept, concept_relationship, source_vocab, target_vocab):
+    """Build a many-to-one crosswalk from source_vocab concept_ids to target_vocab concept_ids.
+
+    Uses the 'Maps to' / 'Mapped from' relationships in concept_relationship. Since OMOP stores
+    these as an inverse pair (e.g. ICD10CM 'Maps to' SNOMED and SNOMED 'Mapped from' ICD10CM are
+    the same underlying link), both storage directions are checked so the crosswalk works
+    regardless of which vocabulary is treated as concept_id_1 vs concept_id_2. When a source
+    concept maps to multiple target concepts, the lowest target concept_id is chosen as a
+    deterministic tie-breaker.
+    """
+    source_concept = concept.where(F.col("vocabulary_id") == source_vocab).select(
+        F.col("concept_id").alias("source_concept_id")
+    )
+    target_concept = concept.where(F.col("vocabulary_id") == target_vocab).select(
+        F.col("concept_id").alias("target_concept_id")
+    )
+    relationship = concept_relationship.where(F.col("relationship_id").isin(["Maps to", "Mapped from"]))
+
+    forward = (
+        source_concept.join(relationship, source_concept["source_concept_id"] == F.col("concept_id_1"))
+        .join(target_concept, F.col("concept_id_2") == target_concept["target_concept_id"])
+        .select("source_concept_id", "target_concept_id")
+    )
+    backward = (
+        source_concept.join(relationship, source_concept["source_concept_id"] == F.col("concept_id_2"))
+        .join(target_concept, F.col("concept_id_1") == target_concept["target_concept_id"])
+        .select("source_concept_id", "target_concept_id")
+    )
+
+    return (
+        forward.union(backward)
+        .distinct()
+        .groupBy("source_concept_id")
+        .agg(F.min("target_concept_id").alias("target_concept_id"))
+    )
+
+
+def map_condition_source_concepts_to_icd(condition_occurrence, concept, concept_relationship):
+    """Map SNOMED-coded condition_source_concept_id to its ICD10CM equivalent when one exists.
+
+    ETHOS/CoMET split ICD10CM/ICD9CM source codes into multi-part tokens (e.g. ICD10CM/0/E03).
+    When the source data records a condition using SNOMED instead, this looks up an ICD10CM
+    concept it maps to (via the standard OMOP 'Maps to'/'Mapped from' relationship, normally
+    populated in the ICD10CM -> SNOMED direction) so it can still be split downstream. If no
+    ICD10CM equivalent exists, the original SNOMED code is kept as-is (as a single, unsplit
+    token).
+    """
+    condition_occurrence = condition_occurrence.select(
+        [F.col(f_n).alias(f_n.lower()) for f_n in condition_occurrence.schema.fieldNames()]
+    )
+
+    crosswalk = _build_vocab_crosswalk(concept, concept_relationship, "SNOMED", "ICD10CM")
+
+    condition_source_fields = [
+        F.coalesce(F.col("target_concept_id"), F.col("condition_source_concept_id")).alias(
+            "condition_source_concept_id"
+        )
+    ]
+    condition_source_fields.extend(
+        [
+            F.col(f_n)
+            for f_n in condition_occurrence.schema.fieldNames()
+            if f_n != "condition_source_concept_id"
+        ]
+    )
+
+    condition_occurrence = condition_occurrence.join(
+        crosswalk,
+        condition_occurrence["condition_source_concept_id"] == crosswalk["source_concept_id"],
+        "left_outer",
+    ).select(condition_source_fields)
+
+    return condition_occurrence
+
+
+def map_procedure_source_concepts_to_icd10pcs(procedure_occurrence, concept, concept_relationship):
+    """Map CPT4-coded procedure_source_concept_id to its ICD10PCS equivalent when one exists.
+
+    Mirrors map_condition_source_concepts_to_icd, but for procedures: CPT4 codes are mapped to
+    ICD10PCS when a crosswalk exists so they can be split into ICD10PCS/{part}/{code} tokens
+    downstream; otherwise the original CPT4 code is kept as a single, unsplit token.
+    """
+    procedure_occurrence = procedure_occurrence.select(
+        [F.col(f_n).alias(f_n.lower()) for f_n in procedure_occurrence.schema.fieldNames()]
+    )
+
+    crosswalk = _build_vocab_crosswalk(concept, concept_relationship, "CPT4", "ICD10PCS")
+
+    procedure_source_fields = [
+        F.coalesce(F.col("target_concept_id"), F.col("procedure_source_concept_id")).alias(
+            "procedure_source_concept_id"
+        )
+    ]
+    procedure_source_fields.extend(
+        [
+            F.col(f_n)
+            for f_n in procedure_occurrence.schema.fieldNames()
+            if f_n != "procedure_source_concept_id"
+        ]
+    )
+
+    procedure_occurrence = procedure_occurrence.join(
+        crosswalk,
+        procedure_occurrence["procedure_source_concept_id"] == crosswalk["source_concept_id"],
+        "left_outer",
+    ).select(procedure_source_fields)
+
+    return procedure_occurrence
+
+
 def roll_up_diagnosis(condition_occurrence, concept, concept_relationship):
     list_3dig_code = [
         "3-char nonbill code",

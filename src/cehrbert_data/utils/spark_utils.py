@@ -35,7 +35,14 @@ from cehrbert_data.decorators import (
     time_token_func,
 )
 
-from cehrbert_data.utils.vocab_utils import roll_up_to_drug_ingredients, roll_up_diagnosis, roll_up_procedure, map_to_atc_codes
+from cehrbert_data.utils.vocab_utils import (
+    roll_up_to_drug_ingredients,
+    roll_up_diagnosis,
+    roll_up_procedure,
+    map_to_atc_codes,
+    map_condition_source_concepts_to_icd,
+    map_procedure_source_concepts_to_icd10pcs,
+)
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
@@ -347,6 +354,8 @@ def preprocess_domain_table(
         with_diagnosis_rollup=False,
         with_drug_rollup=True,
         with_atc_rollup=False,
+        with_condition_icd_mapping=False,
+        with_procedure_icd_mapping=False,
 ):
     domain_table = spark.read.parquet(os.path.join(input_folder, domain_table_name))
     if "concept" in domain_table_name.lower():
@@ -387,6 +396,26 @@ def preprocess_domain_table(
             concept = spark.read.parquet(os.path.join(input_folder, "concept"))
             concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
             domain_table = map_to_atc_codes(domain_table, concept, concept_relationship)
+
+    if with_condition_icd_mapping:
+        if (
+                domain_table_name == "condition_occurrence"
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
+        ):
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            domain_table = map_condition_source_concepts_to_icd(domain_table, concept, concept_relationship)
+
+    if with_procedure_icd_mapping:
+        if (
+                domain_table_name == "procedure_occurrence"
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
+        ):
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            domain_table = map_procedure_source_concepts_to_icd10pcs(domain_table, concept, concept_relationship)
 
     if with_diagnosis_rollup:
         if (

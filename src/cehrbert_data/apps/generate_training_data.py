@@ -67,12 +67,17 @@ def main(
     # up to their 3-digit parent first would collapse the decimal part and defeat that splitting,
     # so this must stay off for both.
     with_diagnosis_rollup = False
-    # Both ETHOS and CoMET represent drugs at the RxNorm ingredient level: ETHOS further maps
-    # ingredients to ATC and splits the ATC code, while CoMET keeps the RxNorm ingredient
-    # concept as a single, unsplit token (with_atc_rollup stays off for CoMET).
+    # Both ETHOS and CoMET represent drugs at the RxNorm ingredient level and further map
+    # ingredients to ATC and split the ATC code (identical drug tokenization for both).
     with_drug_rollup = with_drug_rollup or is_ethos or is_comet
-    with_atc_rollup = is_ethos
+    with_atc_rollup = is_ethos or is_comet
     use_value_bins = is_ethos or is_comet
+    # Both ETHOS and CoMET map SNOMED-coded conditions to ICD10CM (falling back to the original
+    # SNOMED code when no crosswalk exists) so more conditions benefit from ICD10CM splitting.
+    with_condition_icd_mapping = is_ethos or is_comet
+    # ETHOS additionally maps CPT4-coded procedures to ICD10PCS for splitting; CoMET keeps CPT4
+    # codes as-is (unsplit, single tokens).
+    with_procedure_icd_mapping = is_ethos
 
     logger = logging.getLogger(__name__)
     logger.info(
@@ -95,6 +100,8 @@ def main(
         f"with_drug_rollup: {with_drug_rollup}\n"
         f"with_atc_rollup: {with_atc_rollup}\n"
         f"use_value_bins: {use_value_bins}\n"
+        f"with_condition_icd_mapping: {with_condition_icd_mapping}\n"
+        f"with_procedure_icd_mapping: {with_procedure_icd_mapping}\n"
         f"refresh_measurement: {refresh_measurement}\n"
         f"aggregate_by_hour: {aggregate_by_hour}\n"
         f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
@@ -114,6 +121,8 @@ def main(
             with_drug_rollup=with_drug_rollup,
             with_diagnosis_rollup=with_diagnosis_rollup,
             with_atc_rollup=with_atc_rollup,
+            with_condition_icd_mapping=with_condition_icd_mapping,
+            with_procedure_icd_mapping=with_procedure_icd_mapping,
         )
         domain_table = invalidate_visit_id(
             domain_table,
