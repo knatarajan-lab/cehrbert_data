@@ -71,7 +71,7 @@ def main(
     # ingredients to ATC and splits the ATC code, while CoMET keeps the RxNorm ingredient
     # concept as a single, unsplit token (with_atc_rollup stays off for CoMET).
     with_drug_rollup = with_drug_rollup or is_ethos or is_comet
-    with_atc_rollup = is_ethos
+    with_atc_rollup = is_ethos or is_comet
     use_value_bins = is_ethos or is_comet
 
     logger = logging.getLogger(__name__)
