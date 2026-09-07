@@ -6,6 +6,7 @@ from typing import Optional, Union, Set, Callable
 
 import numpy as np
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 
 
 class AttType(Enum):
@@ -34,6 +35,26 @@ class PatientEventDecorator(ABC):
 
     def decorate(self, patient_events):
         decorated_patient_events = self._decorate(patient_events)
+        # parent_concept_id/element_id identify, for a code split into multiple tokens (e.g.
+        # ATC/0/C07, ATC/1/A, ATC/2/B03), which original un-split code and which split position
+        # a token came from; see extract_events_by_domain() in spark_utils.py. Decorators create
+        # brand new tokens (ATT, demographic, death, visit boundary, etc.) that don't have a
+        # split origin, so backfill them here rather than in every decorator implementation.
+        if "parent_concept_id" not in decorated_patient_events.columns:
+            decorated_patient_events = decorated_patient_events.withColumn(
+                "parent_concept_id", F.col("standard_concept_id").cast("string")
+            )
+        else:
+            decorated_patient_events = decorated_patient_events.withColumn(
+                "parent_concept_id",
+                F.coalesce(F.col("parent_concept_id"), F.col("standard_concept_id").cast("string")),
+            )
+        if "element_id" not in decorated_patient_events.columns:
+            decorated_patient_events = decorated_patient_events.withColumn("element_id", F.lit(0))
+        else:
+            decorated_patient_events = decorated_patient_events.withColumn(
+                "element_id", F.coalesce(F.col("element_id"), F.lit(0))
+            )
         self.validate(decorated_patient_events)
         return decorated_patient_events
 
@@ -76,7 +97,9 @@ class PatientEventDecorator(ABC):
             "visit_start_datetime",
             "visit_concept_order",
             "concept_order",
-            "event_group_id"
+            "event_group_id",
+            "parent_concept_id",
+            "element_id",
         }
 
     def validate(self, patient_events: DataFrame):

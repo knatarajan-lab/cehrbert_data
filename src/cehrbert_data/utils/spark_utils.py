@@ -217,6 +217,12 @@ def extract_events_by_domain(
             )
             # Filter out the zero concept numeric events
             domain_records = domain_records.where(F.col("standard_concept_id") != "0")
+            # Numeric domains don't split a code into multiple tokens, so the token itself is
+            # its own parent and there is no split position (see the comment on parent_concept_id
+            # / element_id in the non-numeric branch below).
+            domain_records = domain_records.withColumn(
+                "parent_concept_id", F.col("standard_concept_id").cast("string")
+            ).withColumn("element_id", F.lit(0))
         else:
             # Remove records that don't have a date or standard_concept_id
             domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
@@ -234,6 +240,8 @@ def extract_events_by_domain(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
                     domain_records["condition_source_concept_id"] == concept["concept_id"],
                     "left_outer",
+                ).withColumn(
+                    "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
                     F.when(
@@ -260,6 +268,8 @@ def extract_events_by_domain(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
                     domain_records["procedure_source_concept_id"] == concept["concept_id"],
                     "left_outer",
+                ).withColumn(
+                    "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
                     F.when(
@@ -306,6 +316,8 @@ def extract_events_by_domain(
                     domain_records["drug_source_concept_id"] == concept["concept_id"],
                     "left_outer",
                 ).withColumn(
+                    "parent_concept_id", F.col(concept_id_field).cast("string")
+                ).withColumn(
                     concept_id_field + "_array",
                     F.when(
                         F.col("vocabulary_id") == "ATC",
@@ -337,6 +349,16 @@ def extract_events_by_domain(
                 F.lit(None).cast("float").alias("number_as_value"),
                 F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(domain_records) else F.lit(NA).alias("unit"),
+                # parent_concept_id/element_id identify, for a code split into multiple tokens
+                # (e.g. ATC/0/C07, ATC/1/A, ATC/2/B03), which original un-split code and which
+                # split position a token came from. Without these, tokens from multiple codes
+                # that tie on every other sort key (e.g. several ingredients of one combination
+                # drug administered at the same time) get ordered by the token string itself,
+                # which interleaves their split parts by position instead of keeping each code's
+                # own parts together.
+                domain_records["parent_concept_id"] if "parent_concept_id" in domain_records.columns
+                else domain_records[concept_id_field].cast("string").alias("parent_concept_id"),
+                F.col("element_id") if "element_id" in domain_records.columns else F.lit(0).alias("element_id"),
             ).distinct()
 
         if ehr_events is None:
@@ -676,7 +698,13 @@ def create_sequence_data_with_att(
             "index_date"
         )
 
-    # add randomness to the order of the concepts that have the same time stamp
+    # Tokens split from the same original code (e.g. ATC/0/C07, ATC/1/A, ATC/2/B03, produced when
+    # several ingredients of one combination drug, or several diagnoses, tie on every other sort
+    # key below) must stay grouped by the code they came from and ordered by their split position
+    # -- not sorted by the token string itself, which would interleave different codes' parts by
+    # position instead of keeping each one's parts together. parent_concept_id/element_id (see
+    # extract_events_by_domain()) carry that origin through; standard_concept_id is kept as a
+    # final tiebreaker only for full determinism.
     order_udf = F.row_number().over(
         W.partitionBy("cohort_member_id", "person_id").orderBy(
             "visit_rank_order",
@@ -684,6 +712,8 @@ def create_sequence_data_with_att(
             "priority",
             "datetime",
             "event_group_id",
+            "parent_concept_id",
+            "element_id",
             "standard_concept_id",
         )
     )

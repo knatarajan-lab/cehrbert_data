@@ -209,7 +209,9 @@ class AttEventDecorator(PatientEventDecorator):
         if self._exclude_visit_tokens:
             artificial_tokens = att_tokens
         else:
-            artificial_tokens = visit_start_events.unionByName(att_tokens).unionByName(visit_end_events)
+            artificial_tokens = visit_start_events.unionByName(
+                att_tokens, allowMissingColumns=True
+            ).unionByName(visit_end_events, allowMissingColumns=True)
 
         if self._include_visit_type:
             # make sure we don't insert 0 as the visit_type because 0 could be used in other contexts
@@ -231,9 +233,16 @@ class AttEventDecorator(PatientEventDecorator):
                 .drop("min_visit_concept_order", "max_visit_concept_order")
                 .drop("min_concept_order", "max_concept_order")
             )
-            artificial_tokens = artificial_tokens.unionByName(visit_type_tokens)
+            artificial_tokens = artificial_tokens.unionByName(visit_type_tokens, allowMissingColumns=True)
 
         artificial_tokens = artificial_tokens.drop("visit_end_date", "visit_end_datetime")
+
+        # Visit-boundary/ATT tokens are synthetic and don't originate from a split source code,
+        # so the token itself is its own parent and there is no split position (see the comment
+        # on parent_concept_id/element_id in extract_events_by_domain() in spark_utils.py).
+        artificial_tokens = artificial_tokens.withColumn(
+            "parent_concept_id", F.col("standard_concept_id").cast("string")
+        ).withColumn("element_id", F.lit(0))
 
         # Try persisting artificial events
         artificial_tokens = self.try_persist_data(
@@ -305,7 +314,7 @@ class AttEventDecorator(PatientEventDecorator):
         )
 
         # Add discharge events to the inpatient visits
-        inpatient_events = inpatient_events.unionByName(discharge_events)
+        inpatient_events = inpatient_events.unionByName(discharge_events, allowMissingColumns=True)
 
         # Try persisting the inpatient events for fasting processing
         inpatient_events = self.try_persist_data(
@@ -425,9 +434,13 @@ class AttEventDecorator(PatientEventDecorator):
             )
 
             # Insert the first hour tokens between the visit type and first medical event
-            inpatient_att_events = inpatient_att_events.unionByName(first_hour_token_events)
+            inpatient_att_events = inpatient_att_events.unionByName(
+                first_hour_token_events, allowMissingColumns=True
+            )
             # Insert the hour tokens between different groups of events that occur at different hours s
-            inpatient_att_events = inpatient_att_events.unionByName(inpatient_hour_events)
+            inpatient_att_events = inpatient_att_events.unionByName(
+                inpatient_hour_events, allowMissingColumns=True
+            )
 
 
         # Try persisting the inpatient att events
@@ -449,10 +462,12 @@ class AttEventDecorator(PatientEventDecorator):
             other_events, os.path.join(self.get_name(), "other_events")
         )
 
-        patient_events = inpatient_events.unionByName(inpatient_att_events).unionByName(other_events)
+        patient_events = inpatient_events.unionByName(
+            inpatient_att_events, allowMissingColumns=True
+        ).unionByName(other_events, allowMissingColumns=True)
 
         self.validate(patient_events)
         self.validate(artificial_tokens)
 
         # artificial_tokens = artificial_tokens.select(sorted(artificial_tokens.columns))
-        return patient_events.unionByName(artificial_tokens)
+        return patient_events.unionByName(artificial_tokens, allowMissingColumns=True)

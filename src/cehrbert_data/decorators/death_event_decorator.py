@@ -115,7 +115,11 @@ class DeathEventDecorator(PatientEventDecorator):
             .drop("time_delta")
         )
 
-        new_tokens = death_events.unionByName(vs_records).unionByName(death_records).unionByName(ve_records)
+        new_tokens = (
+            death_events.unionByName(vs_records, allowMissingColumns=True)
+            .unionByName(death_records, allowMissingColumns=True)
+            .unionByName(ve_records, allowMissingColumns=True)
+        )
         new_tokens = new_tokens.drop("death_date")
         new_tokens = self.try_persist_data(
             new_tokens,
@@ -123,4 +127,4 @@ class DeathEventDecorator(PatientEventDecorator):
         )
         self.validate(new_tokens)
 
-        return patient_events.unionByName(new_tokens)
+        return patient_events.unionByName(new_tokens, allowMissingColumns=True)
