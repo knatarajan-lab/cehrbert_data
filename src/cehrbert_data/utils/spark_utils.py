@@ -1289,7 +1289,17 @@ def get_measurement_events(
     if persistence_folder and spark:
         measurement_events_data_path = os.path.join(persistence_folder, PROCESSED_MEASUREMENT)
         if os.path.exists(measurement_events_data_path) and not refresh:
-            return preprocess_domain_table(spark, persistence_folder, PROCESSED_MEASUREMENT)
+            cached_events = preprocess_domain_table(spark, persistence_folder, PROCESSED_MEASUREMENT)
+            # A cache written before use_value_bins existed (or by a run with a different
+            # use_value_bins setting) won't have VALUE_BIN/ tokens where the caller now expects
+            # them, or vice versa. Detect that mismatch instead of silently returning stale
+            # content -- fall through to recompute, which overwrites the cache below so later
+            # runs don't pay this cost again.
+            cache_has_value_bins = (
+                cached_events.where(F.col("standard_concept_id").startswith("VALUE_BIN/")).limit(1).count() > 0
+            )
+            if cache_has_value_bins == use_value_bins:
+                return cached_events
 
     # Register the tables in spark context
     concept.createOrReplaceTempView(CONCEPT)
