@@ -27,6 +27,14 @@ from cehrbert_data.utils.spark_utils import (
 from cehrbert_data.utils.logging_utils import add_console_logging
 
 
+def join_visit_occurrence_with_person(visit_occurrence, person):
+    visit_occurrence_person = visit_occurrence.join(person, "person_id").withColumn(
+        "age",
+        F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12)),
+    )
+    return visit_occurrence_person.drop("birth_datetime")
+
+
 def main(
         input_folder,
         output_folder,
@@ -165,11 +173,7 @@ def main(
         "race_concept_id",
         "gender_concept_id",
     )
-    visit_occurrence_person = visit_occurrence.join(person, "person_id").withColumn(
-        "age",
-        F.ceil(F.months_between(F.col("visit_start_date"), F.col("birth_datetime")) / F.lit(12)),
-    )
-    visit_occurrence_person = visit_occurrence_person.drop("birth_datetime")
+    visit_occurrence_person = join_visit_occurrence_with_person(visit_occurrence, person)
 
     patient_ehr_events = (
         patient_ehr_events.join(visit_occurrence_person, "visit_occurrence_id")
@@ -201,6 +205,9 @@ def main(
             duplicate_records=duplicate_records,
             disconnect_problem_list_records=disconnect_problem_list_records
         )
+        # The artificial visits are part of the returned visit_occurrence only. The visits must be refreshed here,
+        # otherwise the events linked to the artificial visits can't be joined to a visit and are silently dropped.
+        visit_occurrence_person = join_visit_occurrence_with_person(visit_occurrence, person)
 
     death = preprocess_domain_table(spark, input_folder, DEATH) if include_death else None
 
