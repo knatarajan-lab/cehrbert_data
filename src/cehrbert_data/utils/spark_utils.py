@@ -35,8 +35,14 @@ from cehrbert_data.decorators import (
     time_token_func,
 )
 
-from cehrbert_data.utils.vocab_utils import roll_up_to_drug_ingredients, roll_up_diagnosis, roll_up_procedure
-
+from cehrbert_data.utils.vocab_utils import (
+    roll_up_to_drug_ingredients,
+    roll_up_diagnosis,
+    roll_up_procedure,
+    map_to_atc_codes,
+    map_condition_source_concepts_to_icd,
+    map_procedure_source_concepts_to_icd10pcs,
+)
 
 DOMAIN_KEY_FIELDS = {
     "condition_occurrence_id": [
@@ -185,6 +191,7 @@ def extract_events_by_domain(
             persistence_folder = kwargs.get("persistence_folder", None)
             refresh = kwargs.get("refresh_measurement", False)
             aggregate_by_hour = kwargs.get("aggregate_by_hour", False)
+            use_value_bins = kwargs.get("use_value_bins", False)
 
             if domain_table_name == MEASUREMENT:
                 get_events_func = get_measurement_events
@@ -195,16 +202,27 @@ def extract_events_by_domain(
             else:
                 raise RuntimeError("Cannot extract events by domain table")
 
+            extra_kwargs = {}
+            if domain_table_name == MEASUREMENT:
+                extra_kwargs["use_value_bins"] = use_value_bins
+
             domain_records = get_events_func(
                 domain_table,
                 concept=concept,
                 refresh=refresh,
                 spark=spark,
                 persistence_folder=persistence_folder,
-                aggregate_by_hour=aggregate_by_hour
+                aggregate_by_hour=aggregate_by_hour,
+                **extra_kwargs
             )
             # Filter out the zero concept numeric events
             domain_records = domain_records.where(F.col("standard_concept_id") != "0")
+            # Numeric domains don't split a code into multiple tokens, so the token itself is
+            # its own parent and there is no split position (see the comment on parent_concept_id
+            # / element_id in the non-numeric branch below).
+            domain_records = domain_records.withColumn(
+                "parent_concept_id", F.col("standard_concept_id").cast("string")
+            ).withColumn("element_id", F.lit(0))
         else:
             # Remove records that don't have a date or standard_concept_id
             domain_records = domain_table.where(F.col(date_field).isNotNull()).where(
@@ -216,6 +234,110 @@ def extract_events_by_domain(
                 .withColumn("date", F.to_date(F.col(date_field)))
                 .withColumn("datetime", datetime_field_udf)
             )
+            concept: DataFrame = kwargs.get("concept")
+            if domain_table_name.startswith("condition"):
+                domain_records = domain_records.join(
+                    concept.select("concept_id", "vocabulary_id", "concept_code"),
+                    domain_records["condition_source_concept_id"] == concept["concept_id"],
+                    "left_outer",
+                ).withColumn(
+                    "parent_concept_id", F.col(concept_id_field).cast("string")
+                ).withColumn(
+                    concept_id_field + "_array",
+                    F.when(
+                        F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
+                        F.split(F.col("concept_code"), "\\.")
+                    ).otherwise(
+                        F.array(F.col(concept_id_field))
+                    )
+                ).drop(concept_id_field).select(
+                    "*",
+                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                ).withColumn(
+                    concept_id_field,
+                    F.when(
+                        F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
+                    ).otherwise(
+                        F.col(concept_id_field)
+                    )
+                ).drop(concept_id_field + "_array")
+
+            elif domain_table_name.startswith("procedure"):
+                domain_records = domain_records.join(
+                    concept.select("concept_id", "vocabulary_id", "concept_code"),
+                    domain_records["procedure_source_concept_id"] == concept["concept_id"],
+                    "left_outer",
+                ).withColumn(
+                    "parent_concept_id", F.col(concept_id_field).cast("string")
+                ).withColumn(
+                    concept_id_field + "_array",
+                    F.when(
+                        F.col("vocabulary_id") == "ICD10PCS",
+                        F.split(F.col("concept_code"), "")
+                    ).otherwise(
+                        F.array(F.col(concept_id_field))
+                    )
+                ).drop(concept_id_field).select(
+                    "*",
+                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                ).withColumn(
+                    concept_id_field,
+                    F.when(
+                        F.col("vocabulary_id") == "ICD10PCS",
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
+                    ).otherwise(
+                        F.col(concept_id_field)
+                    )
+                ).drop(concept_id_field + "_array")
+
+            elif domain_table_name.startswith("drug"):
+                @F.udf(returnType=T.ArrayType(T.StringType()))
+                def split_atc_code(code):
+                    """Split an ATC code into 1-3 hierarchical tokens.
+
+                    Examples:
+                        A10BA02 -> ['A10', 'B', 'A02']   (levels 2, 3, 4-5)
+                        A10B    -> ['A10', 'B']           (levels 2, 3)
+                        A10     -> ['A10']                (level 2)
+                        A       -> ['A']                  (level 1)
+                    """
+                    if code is None:
+                        return None
+                    tokens = [code[:3]]          # Level 1-2 (first 3 chars)
+                    if len(code) > 3:
+                        tokens.append(code[3])   # Level 3 (one char)
+                    if len(code) > 4:
+                        tokens.append(code[4:])  # Level 4-5 (remaining)
+                    return tokens
+
+                domain_records = domain_records.join(
+                    concept.select("concept_id", "vocabulary_id", "concept_code"),
+                    domain_records["drug_source_concept_id"] == concept["concept_id"],
+                    "left_outer",
+                ).withColumn(
+                    "parent_concept_id", F.col(concept_id_field).cast("string")
+                ).withColumn(
+                    concept_id_field + "_array",
+                    F.when(
+                        F.col("vocabulary_id") == "ATC",
+                        split_atc_code(F.col("concept_code"))
+                    ).otherwise(
+                        F.array(F.col(concept_id_field))
+                    )
+                ).drop(concept_id_field).select(
+                    "*",
+                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                ).withColumn(
+                    concept_id_field,
+                    F.when(
+                        F.col("vocabulary_id") == "ATC",
+                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
+                    ).otherwise(
+                        F.col(concept_id_field)
+                    )
+                ).drop(concept_id_field + "_array")
+
             domain_records = domain_records.select(
                 domain_records["person_id"],
                 domain_records[concept_id_field].alias("standard_concept_id"),
@@ -223,10 +345,20 @@ def extract_events_by_domain(
                 domain_records["datetime"].cast(T.TimestampType()),
                 domain_records["visit_occurrence_id"],
                 F.lit(domain_table_name.split("_")[0]).alias("domain"),
-                F.lit(None).cast("string").alias("event_group_id"),
+                F.col(f"{domain_table_name}_id").cast("string").alias("event_group_id"),
                 F.lit(None).cast("float").alias("number_as_value"),
                 F.lit(None).cast("string").alias("concept_as_value"),
                 F.col("unit") if domain_has_unit(domain_records) else F.lit(NA).alias("unit"),
+                # parent_concept_id/element_id identify, for a code split into multiple tokens
+                # (e.g. ATC/0/C07, ATC/1/A, ATC/2/B03), which original un-split code and which
+                # split position a token came from. Without these, tokens from multiple codes
+                # that tie on every other sort key (e.g. several ingredients of one combination
+                # drug administered at the same time) get ordered by the token string itself,
+                # which interleaves their split parts by position instead of keeping each code's
+                # own parts together.
+                domain_records["parent_concept_id"] if "parent_concept_id" in domain_records.columns
+                else domain_records[concept_id_field].cast("string").alias("parent_concept_id"),
+                F.col("element_id") if "element_id" in domain_records.columns else F.lit(0).alias("element_id"),
             ).distinct()
 
         if ehr_events is None:
@@ -243,6 +375,9 @@ def preprocess_domain_table(
         domain_table_name,
         with_diagnosis_rollup=False,
         with_drug_rollup=True,
+        with_atc_rollup=False,
+        with_condition_icd_mapping=False,
+        with_procedure_icd_mapping=False,
 ):
     domain_table = spark.read.parquet(os.path.join(input_folder, domain_table_name))
     if "concept" in domain_table_name.lower():
@@ -274,6 +409,36 @@ def preprocess_domain_table(
             concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
             domain_table = roll_up_to_drug_ingredients(domain_table, concept, concept_ancestor)
 
+    if with_atc_rollup:
+        if (
+                domain_table_name == "drug_exposure"
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
+        ):
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            domain_table = map_to_atc_codes(domain_table, concept, concept_relationship)
+
+    if with_condition_icd_mapping:
+        if (
+                domain_table_name == "condition_occurrence"
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
+        ):
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            domain_table = map_condition_source_concepts_to_icd(domain_table, concept, concept_relationship)
+
+    if with_procedure_icd_mapping:
+        if (
+                domain_table_name == "procedure_occurrence"
+                and path.exists(os.path.join(input_folder, "concept"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
+        ):
+            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
+            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            domain_table = map_procedure_source_concepts_to_icd10pcs(domain_table, concept, concept_relationship)
+
     if with_diagnosis_rollup:
         if (
                 domain_table_name == "condition_occurrence"
@@ -287,7 +452,7 @@ def preprocess_domain_table(
         if (
                 domain_table_name == "procedure_occurrence"
                 and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_ancestor"))
+                and path.exists(os.path.join(input_folder, "concept_relationship"))
         ):
             concept = spark.read.parquet(os.path.join(input_folder, "concept"))
             concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
@@ -425,6 +590,47 @@ def create_sequence_data(patient_event, date_filter=None, include_visit_type=Fal
     return patient_grouped_events.select(columns_for_output)
 
 
+def replace_concept_ids_with_concept_codes(patient_events: DataFrame, concept: DataFrame) -> DataFrame:
+    """Replace the tokens that are OMOP concept ids by '<vocabulary_id>/<concept_code>', e.g. CPT4/72100.
+
+    Only tokens that are made purely of digits are concept ids (the other tokens are the ones we derived,
+    e.g. ATC/0/C07, =6mt, year:2012, VALUE_BIN/3). A concept id that is missing from the concept table, or that has
+    no concept code, is kept as is. Spaces in the vocabulary/code are replaced by underscores.
+    """
+    token = F.col("standard_concept_id").cast("string")
+    # Map only the distinct concept ids so that the join with the (small) mapping can be broadcast
+    concept_ids = (
+        patient_events.where(token.rlike("^[0-9]+$"))
+        .select(token.alias("standard_concept_id"))
+        .distinct()
+    )
+    concept_code_tokens = (
+        concept_ids.join(
+            concept.select(
+                F.col("concept_id").cast("string").alias("standard_concept_id"),
+                "vocabulary_id",
+                "concept_code",
+            ),
+            "standard_concept_id",
+        )
+        .where(F.col("vocabulary_id").isNotNull() & F.col("concept_code").isNotNull())
+        .select(
+            "standard_concept_id",
+            F.concat(
+                F.regexp_replace("vocabulary_id", " ", "_"),
+                F.lit("/"),
+                F.regexp_replace("concept_code", " ", "_"),
+            ).alias("concept_code_token"),
+        )
+    )
+    return (
+        patient_events.withColumn("standard_concept_id", token)
+        .join(F.broadcast(concept_code_tokens), "standard_concept_id", "left_outer")
+        .withColumn("standard_concept_id", F.coalesce("concept_code_token", "standard_concept_id"))
+        .drop("concept_code_token")
+    )
+
+
 def create_sequence_data_with_att(
         patient_events,
         visit_occurrence,
@@ -441,6 +647,7 @@ def create_sequence_data_with_att(
         cohort_index: DataFrame = None,
         spark: SparkSession = None,
         persistence_folder: str = None,
+        concept: DataFrame = None,
 ):
     """
     Create a sequence of the events associated with one patient in a chronological order.
@@ -460,6 +667,7 @@ def create_sequence_data_with_att(
     :param cohort_index:
     :param spark: SparkSession
     :param persistence_folder: persistence folder for the temp data frames
+    :param concept: if provided, the concept id tokens are replaced by <vocabulary_id>/<concept_code>
 
     :return:
     """
@@ -533,20 +741,32 @@ def create_sequence_data_with_att(
             "index_date"
         )
 
-    # add randomness to the order of the concepts that have the same time stamp
+    if concept is not None:
+        patient_events = replace_concept_ids_with_concept_codes(patient_events, concept)
+
+    # Tokens split from the same original code (e.g. ATC/0/C07, ATC/1/A, ATC/2/B03, produced when
+    # several ingredients of one combination drug, or several diagnoses, tie on every other sort
+    # key below) must stay grouped by the code they came from and ordered by their split position
+    # -- not sorted by the token string itself, which would interleave different codes' parts by
+    # position instead of keeping each one's parts together. parent_concept_id/element_id (see
+    # extract_events_by_domain()) carry that origin through; standard_concept_id is kept as a
+    # final tiebreaker only for full determinism.
     order_udf = F.row_number().over(
         W.partitionBy("cohort_member_id", "person_id").orderBy(
             "visit_rank_order",
             "concept_order",
             "priority",
             "datetime",
+            "event_group_id",
+            "parent_concept_id",
+            "element_id",
             "standard_concept_id",
         )
     )
 
     dense_rank_udf = F.dense_rank().over(
         W.partitionBy("cohort_member_id", "person_id").orderBy(
-            "visit_rank_order", "concept_order", "priority", "datetime"
+            "visit_rank_order", "concept_order", "priority", "datetime", "event_group_id"
         )
     )
 
@@ -719,7 +939,8 @@ def construct_artificial_visits(
         )
 
         if duplicate_records:
-            patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(patient_events)
+            patient_events = updated_patient_events.where(F.col("visit_occurrence_id").isNull()).unionByName(
+                patient_events)
         else:
             patient_events = updated_patient_events
 
@@ -824,6 +1045,7 @@ def construct_artificial_visits(
 
     return refreshed_patient_events, visit_occurrence
 
+
 def invalidate_visit_id(domain_table, visit_occurrence):
     # Create a flag for valid IDs
     valid_ids = visit_occurrence.select("visit_occurrence_id").distinct()
@@ -842,6 +1064,7 @@ def invalidate_visit_id(domain_table, visit_occurrence):
     )
     return domain_table
 
+
 def extract_ehr_records(
         spark: SparkSession,
         input_folder: str,
@@ -849,6 +1072,8 @@ def extract_ehr_records(
         include_visit_type: bool = False,
         with_diagnosis_rollup: bool = False,
         with_drug_rollup: bool = False,
+        with_atc_rollup: bool = False,
+        use_value_bins: bool = False,
         include_concept_list: bool = False,
         refresh_measurement: bool = False,
         aggregate_by_hour: bool = False,
@@ -878,7 +1103,8 @@ def extract_ehr_records(
             input_folder=input_folder,
             domain_table_name=domain_table_name,
             with_diagnosis_rollup=with_diagnosis_rollup,
-            with_drug_rollup=with_drug_rollup
+            with_drug_rollup=with_drug_rollup,
+            with_atc_rollup=with_atc_rollup,
         )
 
         domain_table = invalidate_visit_id(
@@ -892,7 +1118,8 @@ def extract_ehr_records(
             concept=concept,
             aggregate_by_hour=aggregate_by_hour,
             refresh=refresh_measurement,
-            persistence_folder=input_folder
+            persistence_folder=input_folder,
+            use_value_bins=use_value_bins,
         )
         if patient_ehr_records is None:
             patient_ehr_records = ehr_events
@@ -1051,6 +1278,41 @@ def clean_up_unit(dataframe: DataFrame) -> DataFrame:
     )
 
 
+def add_measurement_value_bins(numeric_events: DataFrame, num_bins: int = 10) -> DataFrame:
+    """Expand each numeric measurement into two tokens: the concept token and a value-bin token.
+
+    For each (standard_concept_id, unit) pair, values are split into `num_bins`
+    equal-frequency buckets using ntile.  A second row is created per measurement
+    with standard_concept_id set to "VALUE_BIN/{bin}" (0-indexed) and number_as_value
+    set to NULL, sharing the same event_group_id as the original measurement
+    token so the two tokens are treated as co-occurring. The bin is computed
+    per (concept_id, unit) pair, but the concept_id/unit are not included in
+    the token itself since the preceding concept token already conveys that
+    context.
+    """
+    bin_window = W.partitionBy("standard_concept_id", "unit").orderBy("number_as_value")
+    events_with_bin = numeric_events.withColumn(
+        "value_bin",
+        (F.ntile(num_bins).over(bin_window) - 1).cast("string"),
+    )
+
+    # Value-bin token rows
+    bin_events = events_with_bin.withColumn(
+        "standard_concept_id",
+        F.concat(
+            F.lit("VALUE_BIN/"),
+            F.col("value_bin"),
+        ),
+    ).withColumn(
+        "number_as_value", F.lit(None).cast("float")
+    ).drop("value_bin")
+
+    # Original measurement token rows (drop the helper column)
+    original_events = events_with_bin.drop("value_bin")
+
+    return original_events.unionByName(bin_events)
+
+
 def get_measurement_events(
         measurement: DataFrame,
         concept: DataFrame,
@@ -1058,6 +1320,7 @@ def get_measurement_events(
         refresh: bool = False,
         spark: SparkSession = None,
         persistence_folder: str = None,
+        use_value_bins: bool = False,
 ) -> DataFrame:
     """
     Extract medical events from the measurement table
@@ -1072,27 +1335,36 @@ def get_measurement_events(
     if persistence_folder and spark:
         measurement_events_data_path = os.path.join(persistence_folder, PROCESSED_MEASUREMENT)
         if os.path.exists(measurement_events_data_path) and not refresh:
-            return preprocess_domain_table(spark, persistence_folder, PROCESSED_MEASUREMENT)
+            cached_events = preprocess_domain_table(spark, persistence_folder, PROCESSED_MEASUREMENT)
+            # A cache written before use_value_bins existed (or by a run with a different
+            # use_value_bins setting) won't have VALUE_BIN/ tokens where the caller now expects
+            # them, or vice versa. Detect that mismatch instead of silently returning stale
+            # content -- fall through to recompute, which overwrites the cache below so later
+            # runs don't pay this cost again.
+            cache_has_value_bins = (
+                cached_events.where(F.col("standard_concept_id").startswith("VALUE_BIN/")).limit(1).count() > 0
+            )
+            if cache_has_value_bins == use_value_bins:
+                return cached_events
 
     # Register the tables in spark context
     concept.createOrReplaceTempView(CONCEPT)
     measurement.createOrReplaceTempView(MEASUREMENT)
     measurement_events = spark.sql(
         """
-        SELECT DISTINCT
-            m.person_id,
-            m.measurement_concept_id AS standard_concept_id,
-            CAST(m.measurement_date AS DATE) AS date,
+        SELECT DISTINCT m.person_id,
+                        m.measurement_concept_id AS standard_concept_id,
+                        CAST(m.measurement_date AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id AS visit_occurrence_id,
             'measurement' AS domain,
-            CAST(NULL AS STRING) AS event_group_id,
+            CAST(measurement_id AS STRING) AS event_group_id,
             m.value_as_number AS number_as_value,
             CAST(m.value_as_concept_id AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, m.unit_source_value, 'N/A') AS unit
         FROM measurement AS m
-        LEFT JOIN concept AS c
-            ON m.unit_concept_id = c.concept_id
+            LEFT JOIN concept AS c
+        ON m.unit_concept_id = c.concept_id
         """
     )
     numeric_events = measurement_events.where(F.col("number_as_value").isNotNull())
@@ -1113,6 +1385,9 @@ def get_measurement_events(
         ).withColumn(
             "event_group_id", F.lit(None).cast("string")
         ).drop("lab_hour")
+
+    if use_value_bins:
+        numeric_events = add_measurement_value_bins(numeric_events)
 
     measurement_events = numeric_events.unionByName(non_numeric_events)
     if spark and persistence_folder:
@@ -1151,10 +1426,9 @@ def get_observation_events(
     observation.createOrReplaceTempView(OBSERVATION)
     observation_events = spark.sql(
         """
-        SELECT DISTINCT
-            o.person_id,
-            o.observation_concept_id AS standard_concept_id,
-            CAST(o.observation_date AS DATE) AS date,
+        SELECT DISTINCT o.person_id,
+                        o.observation_concept_id AS standard_concept_id,
+                        CAST(o.observation_date AS DATE) AS date,
             CAST(COALESCE(o.observation_datetime, o.observation_date) AS TIMESTAMP) AS datetime,
             o.visit_occurrence_id AS visit_occurrence_id,
             'observation' AS domain,
@@ -1163,9 +1437,9 @@ def get_observation_events(
             CAST(o.value_as_concept_id AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, o.unit_source_value, 'N/A') AS unit
         FROM observation AS o
-        LEFT JOIN concept AS c
-            ON o.unit_concept_id = c.concept_id
-    """
+            LEFT JOIN concept AS c
+        ON o.unit_concept_id = c.concept_id
+        """
     )
     numeric_events = observation_events.where(F.col("number_as_value").isNotNull())
     numeric_events = clean_up_unit(numeric_events)
@@ -1221,10 +1495,9 @@ def get_device_events(
     device_exposure.createOrReplaceTempView(DEVICE_EXPOSURE)
     device_events = spark.sql(
         """
-        SELECT DISTINCT
-            d.person_id,
-            d.device_concept_id AS standard_concept_id,
-            CAST(d.device_exposure_start_date AS DATE) AS date,
+        SELECT DISTINCT d.person_id,
+                        d.device_concept_id AS standard_concept_id,
+                        CAST(d.device_exposure_start_date AS DATE) AS date,
             CAST(COALESCE(d.device_exposure_start_datetime, d.device_exposure_start_date) AS TIMESTAMP) AS datetime,
             d.visit_occurrence_id AS visit_occurrence_id,
             'device' AS domain,
@@ -1233,8 +1506,8 @@ def get_device_events(
             CAST(NULL AS STRING) AS concept_as_value,
             COALESCE(c.concept_code, d.unit_source_value, 'N/A') AS unit
         FROM device_exposure AS d
-        LEFT JOIN concept AS c
-            ON d.unit_concept_id = c.concept_id
+            LEFT JOIN concept AS c
+        ON d.unit_concept_id = c.concept_id
         """
     )
     numeric_events = device_events.where(F.col("number_as_value").isNotNull())

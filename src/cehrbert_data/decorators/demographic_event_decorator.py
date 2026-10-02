@@ -149,9 +149,9 @@ class DemographicEventDecorator(PatientEventDecorator):
             sequence_race_token, os.path.join(self.get_name(), "sequence_race_tokens")
         )
 
-        patient_events = patient_events.unionByName(sequence_start_year_token)
-        patient_events = patient_events.unionByName(sequence_age_token)
-        patient_events = patient_events.unionByName(sequence_gender_token)
-        patient_events = patient_events.unionByName(sequence_race_token)
+        patient_events = patient_events.unionByName(sequence_start_year_token, allowMissingColumns=True)
+        patient_events = patient_events.unionByName(sequence_age_token, allowMissingColumns=True)
+        patient_events = patient_events.unionByName(sequence_gender_token, allowMissingColumns=True)
+        patient_events = patient_events.unionByName(sequence_race_token, allowMissingColumns=True)
 
         return patient_events

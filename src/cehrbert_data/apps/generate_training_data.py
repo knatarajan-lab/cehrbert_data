@@ -60,6 +60,28 @@ def main(
         .getOrCreate()
     )
 
+    is_ethos = att_type == AttType.ETHOS
+    is_comet = att_type == AttType.COMET
+    # ETHOS/CoMET split condition/procedure source codes into multi-part tokens (e.g. ICD10CM/0/I21,
+    # ICD10CM/1/9), which requires the full, un-rolled-up source code. Rolling diagnoses/procedures
+    # up to their 3-digit parent first would collapse the decimal part and defeat that splitting,
+    # so this must stay off for both.
+    with_diagnosis_rollup = False
+    # Both ETHOS and CoMET represent drugs at the RxNorm ingredient level and further map
+    # ingredients to ATC and split the ATC code (identical drug tokenization for both).
+    with_drug_rollup = with_drug_rollup or is_ethos or is_comet
+    with_atc_rollup = is_ethos or is_comet
+    use_value_bins = is_ethos or is_comet
+    # Both ETHOS and CoMET map SNOMED-coded conditions to ICD10CM (falling back to the original
+    # SNOMED code when no crosswalk exists) so more conditions benefit from ICD10CM splitting.
+    with_condition_icd_mapping = is_ethos or is_comet
+    # ETHOS additionally maps CPT4-coded procedures to ICD10PCS for splitting; CoMET keeps CPT4
+    # codes as-is (unsplit, single tokens).
+    with_procedure_icd_mapping = is_ethos
+    # Both ETHOS and CoMET tokenize the remaining OMOP concepts by <vocabulary_id>/<concept_code>
+    # (e.g. CPT4/72100, LOINC/8867-4, Visit/IP) instead of by the OMOP concept id.
+    use_concept_codes = is_ethos or is_comet
+
     logger = logging.getLogger(__name__)
     logger.info(
         f"input_folder: {input_folder}\n"
@@ -79,6 +101,11 @@ def main(
         f"exclude_demographic: {exclude_demographic}\n"
         f"use_age_group: {use_age_group}\n"
         f"with_drug_rollup: {with_drug_rollup}\n"
+        f"with_atc_rollup: {with_atc_rollup}\n"
+        f"use_value_bins: {use_value_bins}\n"
+        f"use_concept_codes: {use_concept_codes}\n"
+        f"with_condition_icd_mapping: {with_condition_icd_mapping}\n"
+        f"with_procedure_icd_mapping: {with_procedure_icd_mapping}\n"
         f"refresh_measurement: {refresh_measurement}\n"
         f"aggregate_by_hour: {aggregate_by_hour}\n"
         f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
@@ -95,7 +122,11 @@ def main(
             spark=spark,
             input_folder=input_folder,
             domain_table_name=domain_table_name,
-            with_drug_rollup=with_drug_rollup
+            with_drug_rollup=with_drug_rollup,
+            with_diagnosis_rollup=with_diagnosis_rollup,
+            with_atc_rollup=with_atc_rollup,
+            with_condition_icd_mapping=with_condition_icd_mapping,
+            with_procedure_icd_mapping=with_procedure_icd_mapping,
         )
         domain_table = invalidate_visit_id(
             domain_table,
@@ -106,8 +137,9 @@ def main(
             spark=spark,
             concept=concept,
             aggregate_by_hour=aggregate_by_hour,
-            refresh=refresh_measurement,
-            persistence_folder=input_folder
+            refresh_measurement=refresh_measurement,
+            persistence_folder=input_folder,
+            use_value_bins=use_value_bins,
         )
         if patient_ehr_events is None:
             patient_ehr_events = ehr_events
@@ -193,6 +225,7 @@ def main(
             include_inpatient_hour_token=include_inpatient_hour_token,
             spark=spark,
             persistence_folder=output_folder,
+            concept=concept if use_concept_codes else None,
         )
     else:
         patient_sequence_data = create_sequence_data(

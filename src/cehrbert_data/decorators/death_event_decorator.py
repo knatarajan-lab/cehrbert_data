@@ -10,7 +10,8 @@ from .patient_event_decorator_base import (
     time_week_token,
     time_month_token,
     time_mix_token,
-    time_token_func
+    time_token_func,
+    att_tokens_column
 )
 from .token_priority import (
     VS_TOKEN_PRIORITY,
@@ -106,16 +107,28 @@ class DeathEventDecorator(PatientEventDecorator):
             "death_date",
             F.when(F.col("death_date") < F.col("date"), F.col("date")).otherwise(F.col("death_date")),
         )
+        if self._att_type in (AttType.ETHOS, AttType.COMET):
+            # ETHOS/CoMET time tokens are expressed in minutes (death is only known to the day here)
+            time_delta_expr = F.datediff("death_date", "date") * F.lit(24 * 60)
+            time_token_expr = att_tokens_column(self._att_type, "time_delta")
+        else:
+            time_delta_expr = F.datediff("death_date", "date")
+            time_token_expr = time_token_udf("time_delta")
+
         death_events = (
-            death_events.withColumn("time_delta", F.datediff("death_date", "date"))
-            .withColumn("standard_concept_id", time_token_udf("time_delta"))
+            death_events.withColumn("time_delta", time_delta_expr)
+            .withColumn("standard_concept_id", time_token_expr)
             .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
             .drop("time_delta")
         )
 
-        new_tokens = death_events.unionByName(vs_records).unionByName(death_records).unionByName(ve_records)
+        new_tokens = (
+            death_events.unionByName(vs_records, allowMissingColumns=True)
+            .unionByName(death_records, allowMissingColumns=True)
+            .unionByName(ve_records, allowMissingColumns=True)
+        )
         new_tokens = new_tokens.drop("death_date")
         new_tokens = self.try_persist_data(
             new_tokens,
@@ -123,4 +136,4 @@ class DeathEventDecorator(PatientEventDecorator):
         )
         self.validate(new_tokens)
 
-        return patient_events.unionByName(new_tokens)
+        return patient_events.unionByName(new_tokens, allowMissingColumns=True)

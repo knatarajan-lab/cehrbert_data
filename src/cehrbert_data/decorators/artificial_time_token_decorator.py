@@ -10,7 +10,7 @@ from ..const.artificial_tokens import (
     DISCHARGE_UNKNOWN_TOKEN
 )
 from .patient_event_decorator_base import (
-    PatientEventDecorator, AttType, get_att_function
+    PatientEventDecorator, AttType, att_tokens_column
 )
 from .token_priority import (
     ATT_TOKEN_PRIORITY,
@@ -86,6 +86,7 @@ class AttEventDecorator(PatientEventDecorator):
                 F.col("visit_start_date").cast(T.DateType()).alias("visit_start_date"),
                 F.col("visit_start_datetime").cast(T.TimestampType()).alias("visit_start_datetime"),
                 F.coalesce("visit_end_date", "visit_start_date").cast(T.DateType()).alias("visit_end_date"),
+                F.coalesce("visit_end_datetime", "visit_start_datetime").cast(T.TimestampType()).alias("visit_end_datetime"),
                 "visit_concept_id",
                 "visit_occurrence_id",
                 F.lit("visit").alias("domain"),
@@ -111,6 +112,13 @@ class AttEventDecorator(PatientEventDecorator):
                 F.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
                 F.col("visit_end_date"),
             ).otherwise(F.col("visit_start_date")),
+        )
+        visit_occurrence = visit_occurrence.withColumn(
+            "visit_end_datetime",
+            F.when(
+                F.col("visit_concept_id").isin([9201, 262, 8971, 8920]),
+                F.col("visit_end_datetime"),
+            ).otherwise(F.col("visit_start_datetime")),
         )
 
         weeks_since_epoch_udf = (F.unix_timestamp("date") / F.lit(24 * 60 * 60 * 7)).cast("int")
@@ -154,36 +162,44 @@ class AttEventDecorator(PatientEventDecorator):
             .drop("min_concept_order", "max_concept_order")
         )
 
-        # Get the prev days_since_epoch
-        prev_visit_end_date_udf = F.lag("visit_end_date").over(
-            W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
-        )
-
-        # Compute the time difference between the current record and the previous record
-        time_delta_udf = F.when(F.col("prev_visit_end_date").isNull(), 0).otherwise(
-            F.datediff("visit_start_date", "prev_visit_end_date")
-        )
-
-        # Udf for calculating the time token
-        time_token_udf = F.udf(get_att_function(self._att_type), T.StringType())
+        if self._att_type in (AttType.ETHOS, AttType.COMET):
+            # ETHOS/CoMET tokens are minute-resolution — use datetimes for the lag and delta
+            prev_visit_end_col = F.lag("visit_end_datetime").over(
+                W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
+            )
+            time_delta_col = F.when(F.col("prev_visit_end_datetime").isNull(), 0).otherwise(
+                ((F.unix_timestamp("visit_start_datetime") - F.unix_timestamp("prev_visit_end_datetime")) / 60
+                 ).cast("int")
+            )
+            prev_col_name = "prev_visit_end_datetime"
+        else:
+            # All other ATT types use day-resolution
+            prev_visit_end_col = F.lag("visit_end_date").over(
+                W.partitionBy("person_id", "cohort_member_id").orderBy("visit_rank_order")
+            )
+            time_delta_col = F.when(F.col("prev_visit_end_date").isNull(), 0).otherwise(
+                F.datediff("visit_start_date", "prev_visit_end_date")
+            )
+            prev_col_name = "prev_visit_end_date"
 
         att_tokens = (
             visits.withColumn("datetime", F.to_timestamp("date"))
-            .withColumn("prev_visit_end_date", prev_visit_end_date_udf)
-            .where(F.col("prev_visit_end_date").isNotNull())
-            .withColumn("time_delta", time_delta_udf)
+            .withColumn(prev_col_name, prev_visit_end_col)
+            .where(F.col(prev_col_name).isNotNull())
+            .withColumn("time_delta", time_delta_col)
             .withColumn(
                 "time_delta",
                 F.when(F.col("time_delta") < 0, F.lit(0)).otherwise(F.col("time_delta")),
             )
-            .withColumn("standard_concept_id", time_token_udf("time_delta"))
+            # ETHOS/CoMET expand a gap into zero or more tokens (e.g. several =6mt), hence one row per token
+            .withColumn("standard_concept_id", att_tokens_column(self._att_type, "time_delta"))
             .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
             .withColumn("visit_rank_order", F.col("visit_rank_order"))
             .withColumn("visit_concept_order", F.col("min_visit_concept_order"))
             .withColumn("concept_order", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .drop("prev_visit_end_date", "time_delta")
+            .drop(prev_col_name, "time_delta")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
         )
@@ -191,7 +207,9 @@ class AttEventDecorator(PatientEventDecorator):
         if self._exclude_visit_tokens:
             artificial_tokens = att_tokens
         else:
-            artificial_tokens = visit_start_events.unionByName(att_tokens).unionByName(visit_end_events)
+            artificial_tokens = visit_start_events.unionByName(
+                att_tokens, allowMissingColumns=True
+            ).unionByName(visit_end_events, allowMissingColumns=True)
 
         if self._include_visit_type:
             # make sure we don't insert 0 as the visit_type because 0 could be used in other contexts
@@ -213,9 +231,16 @@ class AttEventDecorator(PatientEventDecorator):
                 .drop("min_visit_concept_order", "max_visit_concept_order")
                 .drop("min_concept_order", "max_concept_order")
             )
-            artificial_tokens = artificial_tokens.unionByName(visit_type_tokens)
+            artificial_tokens = artificial_tokens.unionByName(visit_type_tokens, allowMissingColumns=True)
 
-        artificial_tokens = artificial_tokens.drop("visit_end_date")
+        artificial_tokens = artificial_tokens.drop("visit_end_date", "visit_end_datetime")
+
+        # Visit-boundary/ATT tokens are synthetic and don't originate from a split source code,
+        # so the token itself is its own parent and there is no split position (see the comment
+        # on parent_concept_id/element_id in extract_events_by_domain() in spark_utils.py).
+        artificial_tokens = artificial_tokens.withColumn(
+            "parent_concept_id", F.col("standard_concept_id").cast("string")
+        ).withColumn("element_id", F.lit(0))
 
         # Try persisting artificial events
         artificial_tokens = self.try_persist_data(
@@ -233,7 +258,6 @@ class AttEventDecorator(PatientEventDecorator):
             inpatient_visits, ["visit_occurrence_id", "cohort_member_id"]
         )
 
-        inpatient_time_token_udf = F.udf(get_att_function(self._inpatient_att_type), T.StringType())
         # Fill in the visit_end_date if null (because some visits are still ongoing at the time of data extraction)
         # Bound the event dates within visit_start_date and visit_end_date
         # Generate a span rank to indicate the position of the group of events
@@ -270,7 +294,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("priority", F.lit(DISCHARGE_TOKEN_PRIORITY))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .drop("discharged_to_concept_id", "visit_end_date")
+            .drop("discharged_to_concept_id", "visit_end_date", "visit_end_datetime")
             .drop("min_visit_concept_order", "max_visit_concept_order")
             .drop("min_concept_order", "max_concept_order")
         )
@@ -287,7 +311,7 @@ class AttEventDecorator(PatientEventDecorator):
         )
 
         # Add discharge events to the inpatient visits
-        inpatient_events = inpatient_events.unionByName(discharge_events)
+        inpatient_events = inpatient_events.unionByName(discharge_events, allowMissingColumns=True)
 
         # Try persisting the inpatient events for fasting processing
         inpatient_events = self.try_persist_data(
@@ -299,10 +323,21 @@ class AttEventDecorator(PatientEventDecorator):
             W.partitionBy("cohort_member_id", "visit_occurrence_id").orderBy("concept_order")
         )
 
-        # Compute the date difference in terms of number of days between the current record and the previous record
-        inpatient_date_delta_udf = F.when(F.col("prev_date").isNull(), 0).otherwise(
-            F.datediff("date", "prev_date")
+        # Get the prev datetime for minute-resolution ETHOS/CoMET time delta computation
+        inpatient_prev_datetime_udf = F.lag("datetime").over(
+            W.partitionBy("cohort_member_id", "visit_occurrence_id").orderBy("concept_order")
         )
+
+        # Compute the date difference in terms of number of days between the current record and the previous record
+        # For ETHOS/CoMET, compute the delta in minutes instead, since ethos_time_tokens_func expects minutes
+        if self._inpatient_att_type in (AttType.ETHOS, AttType.COMET):
+            inpatient_date_delta_udf = F.when(F.col("prev_datetime").isNull(), 0).otherwise(
+                (F.unix_timestamp("datetime") - F.unix_timestamp("prev_datetime")) / F.lit(60)
+            )
+        else:
+            inpatient_date_delta_udf = F.when(F.col("prev_date").isNull(), 0).otherwise(
+                F.datediff("date", "prev_date")
+            )
 
         # Create ATT tokens within the inpatient visits between groups of events that occur on different dates
         inpatient_att_events = (
@@ -314,13 +349,12 @@ class AttEventDecorator(PatientEventDecorator):
             )
             .where(F.col("is_span_boundary") == 1)
             .withColumn("prev_date", inpatient_prev_date_udf)
+            .withColumn("prev_datetime", inpatient_prev_datetime_udf)
             .withColumn("date_delta", inpatient_date_delta_udf)
             .where(F.col("date_delta") != 0)
             .where(F.col("prev_date").isNotNull())
-            .withColumn(
-                "standard_concept_id",
-                F.concat(F.lit("i-"), inpatient_time_token_udf("date_delta")),
-            )
+            .withColumn("standard_concept_id", att_tokens_column(self._inpatient_att_type, "date_delta"))
+            .withColumn("standard_concept_id", F.concat(F.lit("i-"), F.col("standard_concept_id")))
             .withColumn("visit_concept_order", F.col("visit_concept_order"))
             .withColumn("priority", get_inpatient_att_token_priority())
             .withColumn("concept_value_mask", F.lit(0))
@@ -329,7 +363,7 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("is_numeric_type", F.lit(0))
             .withColumn("unit", F.lit(NA))
             .withColumn("event_group_id", F.lit(NA))
-            .drop("prev_date", "date_delta", "is_span_boundary")
+            .drop("prev_date", "prev_datetime", "date_delta", "is_span_boundary")
         )
 
         if self._include_inpatient_hour_token:
@@ -357,7 +391,7 @@ class AttEventDecorator(PatientEventDecorator):
                 .withColumn("event_group_id", F.lit(NA))
                 .drop("min_visit_concept_order", "max_visit_concept_order")
                 .drop("min_concept_order", "max_concept_order")
-                .drop("hour_delta", "visit_end_date")
+                .drop("hour_delta", "visit_end_date", "visit_end_datetime")
             )
 
             # We calculate the hour difference between groups of events if they occur on the same day.
@@ -395,9 +429,13 @@ class AttEventDecorator(PatientEventDecorator):
             )
 
             # Insert the first hour tokens between the visit type and first medical event
-            inpatient_att_events = inpatient_att_events.unionByName(first_hour_token_events)
+            inpatient_att_events = inpatient_att_events.unionByName(
+                first_hour_token_events, allowMissingColumns=True
+            )
             # Insert the hour tokens between different groups of events that occur at different hours s
-            inpatient_att_events = inpatient_att_events.unionByName(inpatient_hour_events)
+            inpatient_att_events = inpatient_att_events.unionByName(
+                inpatient_hour_events, allowMissingColumns=True
+            )
 
 
         # Try persisting the inpatient att events
@@ -419,10 +457,12 @@ class AttEventDecorator(PatientEventDecorator):
             other_events, os.path.join(self.get_name(), "other_events")
         )
 
-        patient_events = inpatient_events.unionByName(inpatient_att_events).unionByName(other_events)
+        patient_events = inpatient_events.unionByName(
+            inpatient_att_events, allowMissingColumns=True
+        ).unionByName(other_events, allowMissingColumns=True)
 
         self.validate(patient_events)
         self.validate(artificial_tokens)
 
         # artificial_tokens = artificial_tokens.select(sorted(artificial_tokens.columns))
-        return patient_events.unionByName(artificial_tokens)
+        return patient_events.unionByName(artificial_tokens, allowMissingColumns=True)
