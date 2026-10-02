@@ -78,6 +78,9 @@ def main(
     # ETHOS additionally maps CPT4-coded procedures to ICD10PCS for splitting; CoMET keeps CPT4
     # codes as-is (unsplit, single tokens).
     with_procedure_icd_mapping = is_ethos
+    # Both ETHOS and CoMET tokenize the remaining OMOP concepts by <vocabulary_id>/<concept_code>
+    # (e.g. CPT4/72100, LOINC/8867-4, Visit/IP) instead of by the OMOP concept id.
+    use_concept_codes = is_ethos or is_comet
 
     logger = logging.getLogger(__name__)
     logger.info(
@@ -100,6 +103,7 @@ def main(
         f"with_drug_rollup: {with_drug_rollup}\n"
         f"with_atc_rollup: {with_atc_rollup}\n"
         f"use_value_bins: {use_value_bins}\n"
+        f"use_concept_codes: {use_concept_codes}\n"
         f"with_condition_icd_mapping: {with_condition_icd_mapping}\n"
         f"with_procedure_icd_mapping: {with_procedure_icd_mapping}\n"
         f"refresh_measurement: {refresh_measurement}\n"
@@ -221,6 +225,7 @@ def main(
             include_inpatient_hour_token=include_inpatient_hour_token,
             spark=spark,
             persistence_folder=output_folder,
+            concept=concept if use_concept_codes else None,
         )
     else:
         patient_sequence_data = create_sequence_data(

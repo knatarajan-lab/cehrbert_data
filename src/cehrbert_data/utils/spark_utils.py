@@ -590,6 +590,47 @@ def create_sequence_data(patient_event, date_filter=None, include_visit_type=Fal
     return patient_grouped_events.select(columns_for_output)
 
 
+def replace_concept_ids_with_concept_codes(patient_events: DataFrame, concept: DataFrame) -> DataFrame:
+    """Replace the tokens that are OMOP concept ids by '<vocabulary_id>/<concept_code>', e.g. CPT4/72100.
+
+    Only tokens that are made purely of digits are concept ids (the other tokens are the ones we derived,
+    e.g. ATC/0/C07, =6mt, year:2012, VALUE_BIN/3). A concept id that is missing from the concept table, or that has
+    no concept code, is kept as is. Spaces in the vocabulary/code are replaced by underscores.
+    """
+    token = F.col("standard_concept_id").cast("string")
+    # Map only the distinct concept ids so that the join with the (small) mapping can be broadcast
+    concept_ids = (
+        patient_events.where(token.rlike("^[0-9]+$"))
+        .select(token.alias("standard_concept_id"))
+        .distinct()
+    )
+    concept_code_tokens = (
+        concept_ids.join(
+            concept.select(
+                F.col("concept_id").cast("string").alias("standard_concept_id"),
+                "vocabulary_id",
+                "concept_code",
+            ),
+            "standard_concept_id",
+        )
+        .where(F.col("vocabulary_id").isNotNull() & F.col("concept_code").isNotNull())
+        .select(
+            "standard_concept_id",
+            F.concat(
+                F.regexp_replace("vocabulary_id", " ", "_"),
+                F.lit("/"),
+                F.regexp_replace("concept_code", " ", "_"),
+            ).alias("concept_code_token"),
+        )
+    )
+    return (
+        patient_events.withColumn("standard_concept_id", token)
+        .join(F.broadcast(concept_code_tokens), "standard_concept_id", "left_outer")
+        .withColumn("standard_concept_id", F.coalesce("concept_code_token", "standard_concept_id"))
+        .drop("concept_code_token")
+    )
+
+
 def create_sequence_data_with_att(
         patient_events,
         visit_occurrence,
@@ -606,6 +647,7 @@ def create_sequence_data_with_att(
         cohort_index: DataFrame = None,
         spark: SparkSession = None,
         persistence_folder: str = None,
+        concept: DataFrame = None,
 ):
     """
     Create a sequence of the events associated with one patient in a chronological order.
@@ -625,6 +667,7 @@ def create_sequence_data_with_att(
     :param cohort_index:
     :param spark: SparkSession
     :param persistence_folder: persistence folder for the temp data frames
+    :param concept: if provided, the concept id tokens are replaced by <vocabulary_id>/<concept_code>
 
     :return:
     """
@@ -697,6 +740,9 @@ def create_sequence_data_with_att(
         ).drop(
             "index_date"
         )
+
+    if concept is not None:
+        patient_events = replace_concept_ids_with_concept_codes(patient_events, concept)
 
     # Tokens split from the same original code (e.g. ATC/0/C07, ATC/1/A, ATC/2/B03, produced when
     # several ingredients of one combination drug, or several diagnoses, tie on every other sort
