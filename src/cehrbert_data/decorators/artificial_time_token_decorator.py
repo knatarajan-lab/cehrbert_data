@@ -10,7 +10,7 @@ from ..const.artificial_tokens import (
     DISCHARGE_UNKNOWN_TOKEN
 )
 from .patient_event_decorator_base import (
-    PatientEventDecorator, AttType, get_att_function
+    PatientEventDecorator, AttType, att_tokens_column
 )
 from .token_priority import (
     ATT_TOKEN_PRIORITY,
@@ -162,9 +162,6 @@ class AttEventDecorator(PatientEventDecorator):
             .drop("min_concept_order", "max_concept_order")
         )
 
-        # Udf for calculating the time token
-        time_token_udf = F.udf(get_att_function(self._att_type), T.StringType())
-
         if self._att_type in (AttType.ETHOS, AttType.COMET):
             # ETHOS/CoMET tokens are minute-resolution — use datetimes for the lag and delta
             prev_visit_end_col = F.lag("visit_end_datetime").over(
@@ -194,7 +191,8 @@ class AttEventDecorator(PatientEventDecorator):
                 "time_delta",
                 F.when(F.col("time_delta") < 0, F.lit(0)).otherwise(F.col("time_delta")),
             )
-            .withColumn("standard_concept_id", time_token_udf("time_delta"))
+            # ETHOS/CoMET expand a gap into zero or more tokens (e.g. several =6mt), hence one row per token
+            .withColumn("standard_concept_id", att_tokens_column(self._att_type, "time_delta"))
             .withColumn("priority", F.lit(ATT_TOKEN_PRIORITY))
             .withColumn("visit_rank_order", F.col("visit_rank_order"))
             .withColumn("visit_concept_order", F.col("min_visit_concept_order"))
@@ -260,7 +258,6 @@ class AttEventDecorator(PatientEventDecorator):
             inpatient_visits, ["visit_occurrence_id", "cohort_member_id"]
         )
 
-        inpatient_time_token_udf = F.udf(get_att_function(self._inpatient_att_type), T.StringType())
         # Fill in the visit_end_date if null (because some visits are still ongoing at the time of data extraction)
         # Bound the event dates within visit_start_date and visit_end_date
         # Generate a span rank to indicate the position of the group of events
@@ -332,7 +329,7 @@ class AttEventDecorator(PatientEventDecorator):
         )
 
         # Compute the date difference in terms of number of days between the current record and the previous record
-        # For ETHOS/CoMET, compute the delta in minutes instead, since ethos_time_token_func expects minutes
+        # For ETHOS/CoMET, compute the delta in minutes instead, since ethos_time_tokens_func expects minutes
         if self._inpatient_att_type in (AttType.ETHOS, AttType.COMET):
             inpatient_date_delta_udf = F.when(F.col("prev_datetime").isNull(), 0).otherwise(
                 (F.unix_timestamp("datetime") - F.unix_timestamp("prev_datetime")) / F.lit(60)
@@ -356,10 +353,8 @@ class AttEventDecorator(PatientEventDecorator):
             .withColumn("date_delta", inpatient_date_delta_udf)
             .where(F.col("date_delta") != 0)
             .where(F.col("prev_date").isNotNull())
-            .withColumn(
-                "standard_concept_id",
-                F.concat(F.lit("i-"), inpatient_time_token_udf("date_delta")),
-            )
+            .withColumn("standard_concept_id", att_tokens_column(self._inpatient_att_type, "date_delta"))
+            .withColumn("standard_concept_id", F.concat(F.lit("i-"), F.col("standard_concept_id")))
             .withColumn("visit_concept_order", F.col("visit_concept_order"))
             .withColumn("priority", get_inpatient_att_token_priority())
             .withColumn("concept_value_mask", F.lit(0))
