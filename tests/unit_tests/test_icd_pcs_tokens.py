@@ -4,6 +4,8 @@ import unittest
 
 from pyspark.sql import SparkSession
 
+from cehrbert_data.utils import icd_cm_tokens as icd_cm_tokens_module
+from cehrbert_data.utils import icd_pcs_tokens as icd_pcs_tokens_module
 from cehrbert_data.utils.icd_pcs_tokens import icd_pcs_tokens
 from cehrbert_data.utils.spark_utils import extract_events_by_domain
 
@@ -97,6 +99,19 @@ class IcdPcsTokensSparkTest(unittest.TestCase):
         self.assertEqual(tokens["1"], [f"ICD10PCS/{i}/{c}" for i, c in enumerate("0DTJ4ZZ")])
         self.assertEqual(tokens["3"], ["103"])
         self.assertEqual(tokens["4"], ["104"])
+
+
+class SparkUdfsTest(unittest.TestCase):
+    def test_udf_functions_are_sent_to_the_workers_by_name(self):
+        """The cloudpickle of PySpark 3.1 can't pickle a lambda or a function defined inside another function with the
+        bytecode of Python 3.11 and later (IndexError: tuple index out of range), so the functions of the UDFs have to
+        be defined in their module, which makes Spark send them by their name."""
+        for module in (icd_cm_tokens_module, icd_pcs_tokens_module):
+            with self.subTest(module=module.__name__):
+                function = module.get_spark_udf().func
+                self.assertNotIn("<lambda>", function.__qualname__)
+                self.assertNotIn("<locals>", function.__qualname__)
+                self.assertEqual(function.__module__, module.__name__)
 
 
 if __name__ == "__main__":

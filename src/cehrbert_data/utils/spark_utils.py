@@ -163,6 +163,29 @@ def is_domain_numeric(domain_table_name: str) -> bool:
     return False
 
 
+def split_atc_code(code):
+    """Split an ATC code into 1-3 hierarchical tokens.
+
+    It is defined in the module and not inside the function that uses it as a UDF: Spark sends a function that is
+    defined inside another function to the workers by value, which the cloudpickle of PySpark 3.1 can't do with the
+    bytecode of Python 3.11 and later, and sends a function of a module by its name.
+
+    Examples:
+        A10BA02 -> ['A10', 'B', 'A02']   (levels 2, 3, 4-5)
+        A10B    -> ['A10', 'B']           (levels 2, 3)
+        A10     -> ['A10']                (level 2)
+        A       -> ['A']                  (level 1)
+    """
+    if code is None:
+        return None
+    tokens = [code[:3]]          # Level 1-2 (first 3 chars)
+    if len(code) > 3:
+        tokens.append(code[3])   # Level 3 (one char)
+    if len(code) > 4:
+        tokens.append(code[4:])  # Level 4-5 (remaining)
+    return tokens
+
+
 def extract_events_by_domain(
         domain_table: DataFrame,
         **kwargs
@@ -300,24 +323,7 @@ def extract_events_by_domain(
                 ).drop(concept_id_field + "_array")
 
             elif domain_table_name.startswith("drug"):
-                @F.udf(returnType=T.ArrayType(T.StringType()))
-                def split_atc_code(code):
-                    """Split an ATC code into 1-3 hierarchical tokens.
-
-                    Examples:
-                        A10BA02 -> ['A10', 'B', 'A02']   (levels 2, 3, 4-5)
-                        A10B    -> ['A10', 'B']           (levels 2, 3)
-                        A10     -> ['A10']                (level 2)
-                        A       -> ['A']                  (level 1)
-                    """
-                    if code is None:
-                        return None
-                    tokens = [code[:3]]          # Level 1-2 (first 3 chars)
-                    if len(code) > 3:
-                        tokens.append(code[3])   # Level 3 (one char)
-                    if len(code) > 4:
-                        tokens.append(code[4:])  # Level 4-5 (remaining)
-                    return tokens
+                split_atc_code_udf = F.udf(split_atc_code, T.ArrayType(T.StringType()))
 
                 domain_records = domain_records.join(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
@@ -329,7 +335,7 @@ def extract_events_by_domain(
                     concept_id_field + "_array",
                     F.when(
                         F.col("vocabulary_id") == "ATC",
-                        split_atc_code(F.col("concept_code"))
+                        split_atc_code_udf(F.col("concept_code"))
                     ).otherwise(
                         F.array(F.col(concept_id_field))
                     )
