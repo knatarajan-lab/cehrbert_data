@@ -35,6 +35,7 @@ from cehrbert_data.decorators import (
     time_token_func,
 )
 
+from cehrbert_data.utils.ethos_code_tokens import get_spark_udfs
 from cehrbert_data.utils.vocab_utils import (
     roll_up_to_drug_ingredients,
     roll_up_diagnosis,
@@ -161,6 +162,28 @@ def is_domain_numeric(domain_table_name: str) -> bool:
     return False
 
 
+def _split_code_expression(is_split_vocabulary, positional_split, concept_id_field, ethos_tokens=None):
+    """The array of tokens of a source code: the ETHOS tokens (a condition and the array, only
+    with `ethos_code_tokens`), else the code split into positional parts, else the concept id."""
+    expression = F.when(is_split_vocabulary, positional_split).otherwise(F.array(F.col(concept_id_field)))
+    if ethos_tokens is not None:
+        condition, tokens = ethos_tokens
+        expression = F.when(condition, tokens).otherwise(expression)
+    return expression
+
+
+def _positional_token_expression(is_split_vocabulary, concept_id_field, ethos_tokens_condition=None):
+    """<vocabulary_id>/<position>/<part> for a part of a split code. The ETHOS tokens are complete
+    and the other concepts keep their concept id."""
+    positional = F.when(
+        is_split_vocabulary,
+        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field)),
+    ).otherwise(F.col(concept_id_field))
+    if ethos_tokens_condition is None:
+        return positional
+    return F.when(ethos_tokens_condition, F.col(concept_id_field)).otherwise(positional)
+
+
 def extract_events_by_domain(
         domain_table: DataFrame,
         **kwargs
@@ -235,6 +258,11 @@ def extract_events_by_domain(
                 .withColumn("datetime", datetime_field_udf)
             )
             concept: DataFrame = kwargs.get("concept")
+            # ETHOS names the tokens of ICD10CM, ICD10PCS and ATC codes like ethos-ares does, e.g.
+            # ICD//CM//ACUTE_MYOCARDIAL_INFARCTION, ICD//CM//3-6//9 (see utils/ethos_code_tokens.py)
+            ethos_code_tokens = kwargs.get("ethos_code_tokens", False)
+            if ethos_code_tokens:
+                icd10cm_tokens_udf, icd10pcs_tokens_udf, atc_tokens_udf = get_spark_udfs()
             if domain_table_name.startswith("condition"):
                 domain_records = domain_records.join(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
@@ -244,22 +272,24 @@ def extract_events_by_domain(
                     "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
-                    F.when(
+                    _split_code_expression(
                         F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
-                        F.split(F.col("concept_code"), "\\.")
-                    ).otherwise(
-                        F.array(F.col(concept_id_field))
+                        F.split(F.col("concept_code"), "\\."),
+                        concept_id_field,
+                        ethos_tokens=(
+                            (F.col("vocabulary_id") == "ICD10CM", icd10cm_tokens_udf(F.col("concept_code")))
+                            if ethos_code_tokens else None
+                        ),
                     )
                 ).drop(concept_id_field).select(
                     "*",
                     F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
                     concept_id_field,
-                    F.when(
+                    _positional_token_expression(
                         F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
-                    ).otherwise(
-                        F.col(concept_id_field)
+                        concept_id_field,
+                        ethos_tokens_condition=(F.col("vocabulary_id") == "ICD10CM") if ethos_code_tokens else None,
                     )
                 ).drop(concept_id_field + "_array")
 
@@ -272,22 +302,24 @@ def extract_events_by_domain(
                     "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
-                    F.when(
+                    _split_code_expression(
                         F.col("vocabulary_id") == "ICD10PCS",
-                        F.split(F.col("concept_code"), "")
-                    ).otherwise(
-                        F.array(F.col(concept_id_field))
+                        F.split(F.col("concept_code"), ""),
+                        concept_id_field,
+                        ethos_tokens=(
+                            (F.col("vocabulary_id") == "ICD10PCS", icd10pcs_tokens_udf(F.col("concept_code")))
+                            if ethos_code_tokens else None
+                        ),
                     )
                 ).drop(concept_id_field).select(
                     "*",
                     F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
                     concept_id_field,
-                    F.when(
+                    _positional_token_expression(
                         F.col("vocabulary_id") == "ICD10PCS",
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
-                    ).otherwise(
-                        F.col(concept_id_field)
+                        concept_id_field,
+                        ethos_tokens_condition=(F.col("vocabulary_id") == "ICD10PCS") if ethos_code_tokens else None,
                     )
                 ).drop(concept_id_field + "_array")
 
@@ -319,22 +351,24 @@ def extract_events_by_domain(
                     "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
-                    F.when(
+                    _split_code_expression(
                         F.col("vocabulary_id") == "ATC",
-                        split_atc_code(F.col("concept_code"))
-                    ).otherwise(
-                        F.array(F.col(concept_id_field))
+                        split_atc_code(F.col("concept_code")),
+                        concept_id_field,
+                        ethos_tokens=(
+                            (F.col("vocabulary_id") == "ATC", atc_tokens_udf(F.col("concept_code")))
+                            if ethos_code_tokens else None
+                        ),
                     )
                 ).drop(concept_id_field).select(
                     "*",
                     F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
                     concept_id_field,
-                    F.when(
+                    _positional_token_expression(
                         F.col("vocabulary_id") == "ATC",
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
-                    ).otherwise(
-                        F.col(concept_id_field)
+                        concept_id_field,
+                        ethos_tokens_condition=(F.col("vocabulary_id") == "ATC") if ethos_code_tokens else None,
                     )
                 ).drop(concept_id_field + "_array")
 
