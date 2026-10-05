@@ -35,6 +35,8 @@ from cehrbert_data.decorators import (
     time_token_func,
 )
 
+from cehrbert_data.utils.icd_cm_tokens import get_spark_udf as get_icd_cm_tokens_udf
+from cehrbert_data.utils.icd_pcs_tokens import get_spark_udf as get_icd_pcs_tokens_udf
 from cehrbert_data.utils.vocab_utils import (
     roll_up_to_drug_ingredients,
     roll_up_diagnosis,
@@ -236,6 +238,18 @@ def extract_events_by_domain(
             )
             concept: DataFrame = kwargs.get("concept")
             if domain_table_name.startswith("condition"):
+                is_icd_cm = F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"])
+                if kwargs.get("ethos_icd_tokens", False):
+                    # ETHOS/CoMET tokenize the diagnosis codes like ethos-ares, e.g. ICD//CM//DORSALGIA,
+                    # ICD//CM//3-6//5, see utils/icd_cm_tokens.py. The tokens are complete and a code that
+                    # gives no tokens is dropped.
+                    icd_cm_parts = get_icd_cm_tokens_udf()(F.col("vocabulary_id"), F.col("concept_code"))
+                    icd_cm_token = F.col(concept_id_field)
+                else:
+                    icd_cm_parts = F.split(F.col("concept_code"), "\\.")
+                    icd_cm_token = F.concat(
+                        F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field)
+                    )
                 domain_records = domain_records.join(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
                     domain_records["condition_source_concept_id"] == concept["concept_id"],
@@ -244,26 +258,30 @@ def extract_events_by_domain(
                     "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
-                    F.when(
-                        F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
-                        F.split(F.col("concept_code"), "\\.")
-                    ).otherwise(
-                        F.array(F.col(concept_id_field))
-                    )
+                    F.when(is_icd_cm, icd_cm_parts).otherwise(F.array(F.col(concept_id_field)))
                 ).drop(concept_id_field).select(
                     "*",
                     F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
                     concept_id_field,
-                    F.when(
-                        F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"]),
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
-                    ).otherwise(
-                        F.col(concept_id_field)
-                    )
+                    F.when(is_icd_cm, icd_cm_token).otherwise(F.col(concept_id_field))
                 ).drop(concept_id_field + "_array")
 
             elif domain_table_name.startswith("procedure"):
+                if kwargs.get("ethos_icd_tokens", False):
+                    # ETHOS/CoMET tokenize the procedure codes like ethos-ares, e.g. ICD//PCS//0, ICD//PCS//D, see
+                    # utils/icd_pcs_tokens.py. ICD-9 procedure codes are converted to ICD-10-PCS and a code that gives
+                    # no tokens is dropped.
+                    is_icd_pcs = F.col("vocabulary_id").isin(["ICD10PCS", "ICD9Proc"])
+                    icd_pcs_parts = get_icd_pcs_tokens_udf()(F.col("vocabulary_id"), F.col("concept_code"))
+                    icd_pcs_token = F.col(concept_id_field)
+                else:
+                    is_icd_pcs = F.col("vocabulary_id") == "ICD10PCS"
+                    # one part per character, a plain split("") also leaves an empty part at the end
+                    icd_pcs_parts = F.split(F.col("concept_code"), "(?!$)")
+                    icd_pcs_token = F.concat(
+                        F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field)
+                    )
                 domain_records = domain_records.join(
                     concept.select("concept_id", "vocabulary_id", "concept_code"),
                     domain_records["procedure_source_concept_id"] == concept["concept_id"],
@@ -272,23 +290,13 @@ def extract_events_by_domain(
                     "parent_concept_id", F.col(concept_id_field).cast("string")
                 ).withColumn(
                     concept_id_field + "_array",
-                    F.when(
-                        F.col("vocabulary_id") == "ICD10PCS",
-                        F.split(F.col("concept_code"), "")
-                    ).otherwise(
-                        F.array(F.col(concept_id_field))
-                    )
+                    F.when(is_icd_pcs, icd_pcs_parts).otherwise(F.array(F.col(concept_id_field)))
                 ).drop(concept_id_field).select(
                     "*",
                     F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
                 ).withColumn(
                     concept_id_field,
-                    F.when(
-                        F.col("vocabulary_id") == "ICD10PCS",
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
-                    ).otherwise(
-                        F.col(concept_id_field)
-                    )
+                    F.when(is_icd_pcs, icd_pcs_token).otherwise(F.col(concept_id_field))
                 ).drop(concept_id_field + "_array")
 
             elif domain_table_name.startswith("drug"):

@@ -34,6 +34,9 @@ dependencies = [
 
 [tool.setuptools_scm]
 
+[tool.setuptools.package-data]
+cehrbert_data = ["resources/*.csv.gz"]
+
 [project.urls]
 Homepage = "https://github.com/knatarajan-lab/cehrbert_data"
 
