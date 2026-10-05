@@ -89,8 +89,9 @@ def main(
     # Both ETHOS and CoMET tokenize the remaining OMOP concepts by <vocabulary_id>/<concept_code>
     # (e.g. CPT4/72100, LOINC/8867-4, Visit/IP) instead of by the OMOP concept id.
     use_concept_codes = is_ethos or is_comet
-    # ETHOS also names the tokens of ICD10CM, ICD10PCS and ATC codes as ethos-ares does (see
-    # utils/ethos_code_tokens.py). CoMET keeps the positional <vocabulary_id>/<position>/<part> tokens.
+    # Both ETHOS and CoMET tokenize the ICD10CM/ICD9CM diagnosis codes like ethos-ares, i.e. ICD-9 is converted to
+    # ICD-10 and the code is split into the category name, the characters 4-6 and the suffix.
+    ethos_icd_cm_tokens = is_ethos or is_comet
 
     logger = logging.getLogger(__name__)
     logger.info(
@@ -150,7 +151,7 @@ def main(
             refresh_measurement=refresh_measurement,
             persistence_folder=input_folder,
             use_value_bins=use_value_bins,
-            ethos_code_tokens=is_ethos,
+            ethos_icd_cm_tokens=ethos_icd_cm_tokens,
         )
         if patient_ehr_events is None:
             patient_ehr_events = ehr_events
