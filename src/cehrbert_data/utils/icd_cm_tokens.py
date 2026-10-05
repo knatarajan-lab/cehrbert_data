@@ -83,7 +83,7 @@ def _icd9_to_icd10() -> Tuple[Dict[str, str], List[str]]:
     return mapping, sorted(mapping)
 
 
-def _normalize(raw_code: str, known_codes: Container[str]) -> str:
+def normalize_icd_code(raw_code: str, known_codes: Container[str]) -> str:
     code = raw_code.replace(".", "").upper()
     while code not in known_codes and code.endswith("0") and len(code) > 3:
         code = code[:-1]
@@ -92,7 +92,7 @@ def _normalize(raw_code: str, known_codes: Container[str]) -> str:
 
 def _convert_icd9_to_icd10(raw_code: str) -> Optional[str]:
     mapping, icd9_codes = _icd9_to_icd10()
-    code = _normalize(raw_code, mapping)
+    code = normalize_icd_code(raw_code, mapping)
     if code in mapping:
         return mapping[code]
     # The ICD-10-CM category of the first of the subcodes, e.g. 585 -> N18
@@ -116,7 +116,7 @@ def icd_cm_tokens(vocabulary_id: Optional[str], concept_code: Optional[str]) -> 
     if vocabulary_id == "ICD9CM":
         icd_code = _convert_icd9_to_icd10(concept_code)
     else:
-        icd_code = _normalize(concept_code, _code_to_name())
+        icd_code = normalize_icd_code(concept_code, _code_to_name())
     if icd_code is None:
         return ()
     category = _code_to_name().get(icd_code[:3])

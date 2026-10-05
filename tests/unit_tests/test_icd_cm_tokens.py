@@ -90,9 +90,9 @@ class IcdCmTokensSparkTest(unittest.TestCase):
              "condition_start_datetime", "condition_source_concept_id", "visit_occurrence_id"],
         )
 
-    def test_conditions_with_ethos_icd_cm_tokens(self):
+    def test_conditions_with_ethos_icd_tokens(self):
         self.assertEqual(
-            self.tokens(self.condition_table(), ethos_icd_cm_tokens=True),
+            self.tokens(self.condition_table(), ethos_icd_tokens=True),
             {
                 "1": ["ICD//CM//ACUTE_MYOCARDIAL_INFARCTION", "ICD//CM//3-6//9"],
                 "2": ["ICD//CM//FRACTURE_OF_FEMUR", "ICD//CM//3-6//001", "ICD//CM//SFX//A"],
@@ -103,7 +103,7 @@ class IcdCmTokensSparkTest(unittest.TestCase):
             },
         )
 
-    def test_conditions_without_ethos_icd_cm_tokens_are_unchanged(self):
+    def test_conditions_without_ethos_icd_tokens_are_unchanged(self):
         self.assertEqual(
             self.tokens(self.condition_table()),
             {
@@ -115,21 +115,15 @@ class IcdCmTokensSparkTest(unittest.TestCase):
             },
         )
 
-    def test_procedures_and_drugs_are_not_changed(self):
-        procedures = self.spark.createDataFrame(
-            [("6", 1, 106, "2020-01-01", "2020-01-01 10:00:00", 6, 1)],
-            ["procedure_occurrence_id", "person_id", "procedure_concept_id", "procedure_date",
-             "procedure_datetime", "procedure_source_concept_id", "visit_occurrence_id"],
-        )
+    def test_drugs_are_not_changed(self):
         drugs = self.spark.createDataFrame(
             [("7", 1, 107, "2020-01-01", "2020-01-01 10:00:00", 7, 1)],
             ["drug_exposure_id", "person_id", "drug_concept_id", "drug_exposure_start_date",
              "drug_exposure_start_datetime", "drug_source_concept_id", "visit_occurrence_id"],
         )
-        for table in (procedures, drugs):
-            tokens = self.tokens(table)
-            self.assertTrue(tokens)
-            self.assertEqual(self.tokens(table, ethos_icd_cm_tokens=True), tokens)
+        tokens = self.tokens(drugs)
+        self.assertEqual(tokens, {"7": ["ATC/0/N02", "ATC/1/B", "ATC/2/E01"]})
+        self.assertEqual(self.tokens(drugs, ethos_icd_tokens=True), tokens)
 
 
 if __name__ == "__main__":
