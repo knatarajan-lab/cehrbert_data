@@ -16,12 +16,10 @@ The mapping is the file of ethos-ares in `cehrbert_data/resources`.
 
 import csv
 import functools
-import gzip
-import os
 import re
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from cehrbert_data.utils.icd_cm_tokens import _RESOURCES_DIR, normalize_icd_code
+from cehrbert_data.utils.icd_cm_tokens import normalize_icd_code, open_resource
 
 _ICD10PCS_CODE = re.compile(r"[0-9A-Z]{7}")
 
@@ -29,7 +27,7 @@ _ICD10PCS_CODE = re.compile(r"[0-9A-Z]{7}")
 @functools.lru_cache(maxsize=1)
 def _icd9_to_icd10_pcs() -> Dict[str, str]:
     icd10_codes: Dict[str, list] = {}
-    with gzip.open(os.path.join(_RESOURCES_DIR, "icd_pcs_9_to_10_mapping.csv.gz"), "rt", newline="") as f:
+    with open_resource("icd_pcs_9_to_10_mapping.csv.gz") as f:
         reader = csv.reader(f)
         next(reader)
         for row in reader:
@@ -55,10 +53,14 @@ def icd_pcs_tokens(vocabulary_id: Optional[str], concept_code: Optional[str]) ->
     return tuple(f"ICD//PCS//{character}" for character in icd_code)
 
 
+def icd_pcs_token_list(vocabulary_id: Optional[str], concept_code: Optional[str]) -> List[str]:
+    """The function of the Spark UDF, defined in the module and not a lambda, see icd_cm_token_list."""
+    return list(icd_pcs_tokens(vocabulary_id, concept_code))
+
+
 def get_spark_udf():
     """The Spark UDF of (vocabulary_id, concept_code) to the array of the tokens."""
     from pyspark.sql import functions as F
     from pyspark.sql import types as T
 
-    return F.udf(lambda vocabulary_id, concept_code: list(icd_pcs_tokens(vocabulary_id, concept_code)),
-                 T.ArrayType(T.StringType()))
+    return F.udf(icd_pcs_token_list, T.ArrayType(T.StringType()))

@@ -22,11 +22,14 @@ import bisect
 import csv
 import functools
 import gzip
-import os
 import re
+from importlib import resources
 from typing import Container, Dict, List, Optional, Tuple
 
-_RESOURCES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources")
+def open_resource(file_name: str):
+    """A text stream of a gzip file in cehrbert_data/resources. importlib.resources reads the file also when the package
+    is not a directory but a zip that is sent to the workers (spark-submit --py-files)."""
+    return gzip.open((resources.files("cehrbert_data") / "resources" / file_name).open("rb"), "rt", newline="")
 
 # The codes that are not in the code list of ethos-ares
 _COMPLEMENTARY_CODE_TO_NAME = {
@@ -58,7 +61,7 @@ _COMPLEMENTARY_CODE_TO_NAME = {
 def _code_to_name() -> Dict[str, str]:
     """ICD-10-CM code (without the dot) to the description of the code."""
     code_to_name = {}
-    with gzip.open(os.path.join(_RESOURCES_DIR, "icd10cm-order-Jan-2021.csv.gz"), "rt", newline="") as f:
+    with open_resource("icd10cm-order-Jan-2021.csv.gz") as f:
         for row in csv.DictReader(f):
             code_to_name.setdefault(row["code"], row["long"])
     code_to_name.update(_COMPLEMENTARY_CODE_TO_NAME)
@@ -69,7 +72,7 @@ def _code_to_name() -> Dict[str, str]:
 def _icd9_to_icd10() -> Tuple[Dict[str, str], List[str]]:
     """ICD-9-CM code to ICD-10-CM code, and the ICD-9-CM codes in order."""
     icd10_codes: Dict[str, List[str]] = {}
-    with gzip.open(os.path.join(_RESOURCES_DIR, "icd_cm_9_to_10_mapping.csv.gz"), "rt", newline="") as f:
+    with open_resource("icd_cm_9_to_10_mapping.csv.gz") as f:
         reader = csv.reader(f)
         next(reader)
         for row in reader:
@@ -126,10 +129,16 @@ def icd_cm_tokens(vocabulary_id: Optional[str], concept_code: Optional[str]) -> 
     return tuple(_unify_code_name(f"ICD//CM//{prefix}{part}") for prefix, part in parts if part != "")
 
 
+def icd_cm_token_list(vocabulary_id: Optional[str], concept_code: Optional[str]) -> List[str]:
+    """The function of the Spark UDF. It is defined in the module and is not a lambda: Spark sends a lambda to the
+    workers by value, which the cloudpickle of PySpark 3.1 can't do with the bytecode of Python 3.11 and later, and
+    sends this function by its name."""
+    return list(icd_cm_tokens(vocabulary_id, concept_code))
+
+
 def get_spark_udf():
     """The Spark UDF of (vocabulary_id, concept_code) to the array of the tokens."""
     from pyspark.sql import functions as F
     from pyspark.sql import types as T
 
-    return F.udf(lambda vocabulary_id, concept_code: list(icd_cm_tokens(vocabulary_id, concept_code)),
-                 T.ArrayType(T.StringType()))
+    return F.udf(icd_cm_token_list, T.ArrayType(T.StringType()))
