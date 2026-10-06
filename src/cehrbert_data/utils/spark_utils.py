@@ -261,34 +261,35 @@ def extract_events_by_domain(
             )
             concept: DataFrame = kwargs.get("concept")
             if domain_table_name.startswith("condition"):
-                is_icd_cm = F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"])
                 if kwargs.get("ethos_icd_tokens", False):
                     # ETHOS/CoMET tokenize the diagnosis codes like ethos-ares, e.g. ICD//CM//DORSALGIA,
                     # ICD//CM//3-6//5, see utils/icd_cm_tokens.py. The tokens are complete and a code that
                     # gives no tokens is dropped.
+                    is_icd_cm = F.col("vocabulary_id").isin(["ICD10CM", "ICD9CM"])
                     icd_cm_parts = get_icd_cm_tokens_udf()(F.col("vocabulary_id"), F.col("concept_code"))
                     icd_cm_token = F.col(concept_id_field)
+                    domain_records = domain_records.join(
+                        concept.select("concept_id", "vocabulary_id", "concept_code"),
+                        domain_records["condition_source_concept_id"] == concept["concept_id"],
+                        "left_outer",
+                    ).withColumn(
+                        "parent_concept_id", F.col(concept_id_field).cast("string")
+                    ).withColumn(
+                        concept_id_field + "_array",
+                        F.when(is_icd_cm, icd_cm_parts).otherwise(F.array(F.col(concept_id_field)))
+                    ).drop(concept_id_field).select(
+                        "*",
+                        F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                    ).withColumn(
+                        concept_id_field,
+                        F.when(is_icd_cm, icd_cm_token).otherwise(F.col(concept_id_field))
+                    ).drop(concept_id_field + "_array")
                 else:
-                    icd_cm_parts = F.split(F.col("concept_code"), "\\.")
-                    icd_cm_token = F.concat(
-                        F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field)
-                    )
-                domain_records = domain_records.join(
-                    concept.select("concept_id", "vocabulary_id", "concept_code"),
-                    domain_records["condition_source_concept_id"] == concept["concept_id"],
-                    "left_outer",
-                ).withColumn(
-                    "parent_concept_id", F.col(concept_id_field).cast("string")
-                ).withColumn(
-                    concept_id_field + "_array",
-                    F.when(is_icd_cm, icd_cm_parts).otherwise(F.array(F.col(concept_id_field)))
-                ).drop(concept_id_field).select(
-                    "*",
-                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
-                ).withColumn(
-                    concept_id_field,
-                    F.when(is_icd_cm, icd_cm_token).otherwise(F.col(concept_id_field))
-                ).drop(concept_id_field + "_array")
+                    domain_records = domain_records.withColumn(
+                        concept_id_field, F.col(concept_id_field).cast("string")
+                    ).withColumn(
+                        "parent_concept_id", F.col(concept_id_field)
+                    ).withColumn("element_id", F.lit(0))
 
             elif domain_table_name.startswith("procedure"):
                 if kwargs.get("ethos_icd_tokens", False):
@@ -298,59 +299,68 @@ def extract_events_by_domain(
                     is_icd_pcs = F.col("vocabulary_id").isin(["ICD10PCS", "ICD9Proc"])
                     icd_pcs_parts = get_icd_pcs_tokens_udf()(F.col("vocabulary_id"), F.col("concept_code"))
                     icd_pcs_token = F.col(concept_id_field)
+                    domain_records = domain_records.join(
+                        concept.select("concept_id", "vocabulary_id", "concept_code"),
+                        domain_records["procedure_source_concept_id"] == concept["concept_id"],
+                        "left_outer",
+                    ).withColumn(
+                        "parent_concept_id", F.col(concept_id_field).cast("string")
+                    ).withColumn(
+                        concept_id_field + "_array",
+                        F.when(is_icd_pcs, icd_pcs_parts).otherwise(F.array(F.col(concept_id_field)))
+                    ).drop(concept_id_field).select(
+                        "*",
+                        F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                    ).withColumn(
+                        concept_id_field,
+                        F.when(is_icd_pcs, icd_pcs_token).otherwise(F.col(concept_id_field))
+                    ).drop(concept_id_field + "_array")
                 else:
-                    is_icd_pcs = F.col("vocabulary_id") == "ICD10PCS"
-                    # one part per character, a plain split("") also leaves an empty part at the end
-                    icd_pcs_parts = F.split(F.col("concept_code"), "(?!$)")
-                    icd_pcs_token = F.concat(
-                        F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field)
-                    )
-                domain_records = domain_records.join(
-                    concept.select("concept_id", "vocabulary_id", "concept_code"),
-                    domain_records["procedure_source_concept_id"] == concept["concept_id"],
-                    "left_outer",
-                ).withColumn(
-                    "parent_concept_id", F.col(concept_id_field).cast("string")
-                ).withColumn(
-                    concept_id_field + "_array",
-                    F.when(is_icd_pcs, icd_pcs_parts).otherwise(F.array(F.col(concept_id_field)))
-                ).drop(concept_id_field).select(
-                    "*",
-                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
-                ).withColumn(
-                    concept_id_field,
-                    F.when(is_icd_pcs, icd_pcs_token).otherwise(F.col(concept_id_field))
-                ).drop(concept_id_field + "_array")
+                    domain_records = domain_records.withColumn(
+                        concept_id_field, F.col(concept_id_field).cast("string")
+                    ).withColumn(
+                        "parent_concept_id", F.col(concept_id_field)
+                    ).withColumn("element_id", F.lit(0))
 
             elif domain_table_name.startswith("drug"):
-                split_atc_code_udf = F.udf(split_atc_code, T.ArrayType(T.StringType()))
+                if kwargs.get("ethos_icd_tokens", False):
+                    split_atc_code_udf = F.udf(split_atc_code, T.ArrayType(T.StringType()))
 
-                domain_records = domain_records.join(
-                    concept.select("concept_id", "vocabulary_id", "concept_code"),
-                    domain_records["drug_source_concept_id"] == concept["concept_id"],
-                    "left_outer",
-                ).withColumn(
-                    "parent_concept_id", F.col(concept_id_field).cast("string")
-                ).withColumn(
-                    concept_id_field + "_array",
-                    F.when(
-                        F.col("vocabulary_id") == "ATC",
-                        split_atc_code_udf(F.col("concept_code"))
-                    ).otherwise(
-                        F.array(F.col(concept_id_field))
-                    )
-                ).drop(concept_id_field).select(
-                    "*",
-                    F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
-                ).withColumn(
-                    concept_id_field,
-                    F.when(
-                        F.col("vocabulary_id") == "ATC",
-                        F.concat(F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"), F.col(concept_id_field))
-                    ).otherwise(
-                        F.col(concept_id_field)
-                    )
-                ).drop(concept_id_field + "_array")
+                    domain_records = domain_records.join(
+                        concept.select("concept_id", "vocabulary_id", "concept_code"),
+                        domain_records["drug_source_concept_id"] == concept["concept_id"],
+                        "left_outer",
+                    ).withColumn(
+                        "parent_concept_id", F.col(concept_id_field).cast("string")
+                    ).withColumn(
+                        concept_id_field + "_array",
+                        F.when(
+                            F.col("vocabulary_id") == "ATC",
+                            split_atc_code_udf(F.col("concept_code"))
+                        ).otherwise(
+                            F.array(F.col(concept_id_field))
+                        )
+                    ).drop(concept_id_field).select(
+                        "*",
+                        F.posexplode(F.col(concept_id_field + "_array")).alias("element_id", concept_id_field)
+                    ).withColumn(
+                        concept_id_field,
+                        F.when(
+                            F.col("vocabulary_id") == "ATC",
+                            F.concat(
+                                F.col("vocabulary_id"), F.lit("/"), F.col("element_id"), F.lit("/"),
+                                F.col(concept_id_field)
+                            )
+                        ).otherwise(
+                            F.col(concept_id_field)
+                        )
+                    ).drop(concept_id_field + "_array")
+                else:
+                    domain_records = domain_records.withColumn(
+                        concept_id_field, F.col(concept_id_field).cast("string")
+                    ).withColumn(
+                        "parent_concept_id", F.col(concept_id_field)
+                    ).withColumn("element_id", F.lit(0))
 
             domain_records = domain_records.select(
                 domain_records["person_id"],
