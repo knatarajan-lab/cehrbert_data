@@ -93,12 +93,11 @@ class IcdPcsTokensSparkTest(unittest.TestCase):
         self.assertNotIn("2", tokens)
         self.assertNotIn("5", tokens)
 
-    def test_icd10pcs_without_ethos_icd_tokens_has_one_token_per_character(self):
-        tokens = self.tokens()
-        # no empty token for the position after the last character
-        self.assertEqual(tokens["1"], [f"ICD10PCS/{i}/{c}" for i, c in enumerate("0DTJ4ZZ")])
-        self.assertEqual(tokens["3"], ["103"])
-        self.assertEqual(tokens["4"], ["104"])
+    def test_procedures_without_ethos_icd_tokens_are_unchanged(self):
+        self.assertEqual(
+            self.tokens(),
+            {str(i): [str(100 + i)] for i in range(1, 6)},
+        )
 
 
 class SparkUdfsTest(unittest.TestCase):

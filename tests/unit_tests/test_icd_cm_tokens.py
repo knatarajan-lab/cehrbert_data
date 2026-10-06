@@ -107,11 +107,11 @@ class IcdCmTokensSparkTest(unittest.TestCase):
         self.assertEqual(
             self.tokens(self.condition_table()),
             {
-                "1": ["ICD10CM/0/I21", "ICD10CM/1/9"],
-                "2": ["ICD10CM/0/S72", "ICD10CM/1/001A"],
-                "3": ["ICD9CM/0/428", "ICD9CM/1/22"],
+                "1": ["101"],
+                "2": ["102"],
+                "3": ["103"],
                 "4": ["104"],
-                "5": ["ICD10CM/0/QQQ", "ICD10CM/1/1"],
+                "5": ["105"],
             },
         )
 
@@ -122,8 +122,11 @@ class IcdCmTokensSparkTest(unittest.TestCase):
              "drug_exposure_start_datetime", "drug_source_concept_id", "visit_occurrence_id"],
         )
         tokens = self.tokens(drugs)
-        self.assertEqual(tokens, {"7": ["ATC/0/N02", "ATC/1/B", "ATC/2/E01"]})
-        self.assertEqual(self.tokens(drugs, ethos_icd_tokens=True), tokens)
+        self.assertEqual(tokens, {"7": ["107"]})
+        self.assertEqual(
+            self.tokens(drugs, ethos_icd_tokens=True),
+            {"7": ["ATC/0/N02", "ATC/1/B", "ATC/2/E01"]},
+        )
 
 
 if __name__ == "__main__":

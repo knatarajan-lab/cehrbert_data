@@ -1,5 +1,7 @@
 import unittest
 
+from pyspark.sql import functions as F
+
 from cehrbert_data.apps.generate_training_data import main
 from cehrbert_data.decorators import AttType
 
@@ -27,6 +29,12 @@ class GenerateTrainingDataTest(PySparkAbstract):
             att_type=AttType.DAY,
             inpatient_att_type=AttType.DAY,
         )
+
+        patient_events = self.spark.read.parquet(f"{self.get_output_folder()}/all_patient_events")
+        non_omop_concept_ids = patient_events.where(
+            ~F.col("standard_concept_id").rlike(r"^[0-9]+$")
+        )
+        self.assertEqual(non_omop_concept_ids.count(), 0)
 
 
 if __name__ == "__main__":
