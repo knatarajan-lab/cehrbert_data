@@ -1070,6 +1070,22 @@ def construct_artificial_visits(
     return refreshed_patient_events, visit_occurrence
 
 
+def exclude_condition_type_concepts(condition_occurrence: DataFrame, condition_type_concept_ids: List[int]) -> DataFrame:
+    """
+    Remove the condition_occurrence records whose condition_type_concept_id is in the list, e.g. 32840 (EHR problem
+    list). The records without a condition_type_concept_id are kept.
+
+    :param condition_occurrence: the condition_occurrence table with lowercase column names
+    :param condition_type_concept_ids: the condition_type_concept_ids to exclude
+    :return: the condition_occurrence table without the excluded records
+    """
+    if "condition_type_concept_id" not in condition_occurrence.columns:
+        raise ValueError("condition_type_concept_id is not in the condition_occurrence table")
+    return condition_occurrence.where(
+        F.col("condition_type_concept_id").isNull() | ~F.col("condition_type_concept_id").isin(condition_type_concept_ids)
+    )
+
+
 def invalidate_visit_id(domain_table, visit_occurrence):
     # Create a flag for valid IDs
     valid_ids = visit_occurrence.select("visit_occurrence_id").distinct()
