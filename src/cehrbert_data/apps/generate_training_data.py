@@ -3,6 +3,7 @@ import datetime
 import logging
 import os
 import shutil
+from typing import List, Optional
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -22,7 +23,8 @@ from cehrbert_data.utils.spark_utils import (
     extract_events_by_domain,
     validate_table_names,
     construct_artificial_visits,
-    invalidate_visit_id
+    invalidate_visit_id,
+    exclude_condition_type_concepts,
 )
 from cehrbert_data.utils.logging_utils import add_console_logging
 
@@ -61,6 +63,7 @@ def main(
         should_construct_artificial_visits: bool = False,
         duplicate_records: bool = False,
         disconnect_problem_list_records: bool = False,
+        exclude_condition_type_concept_ids: Optional[List[int]] = None,
 ):
     spark = (
         SparkSession.builder.appName("Generate CEHR-BERT Training Data")
@@ -122,6 +125,7 @@ def main(
         f"should_construct_artificial_visits: {should_construct_artificial_visits}\n"
         f"duplicate_records: {duplicate_records}\n"
         f"disconnect_problem_list_records: {disconnect_problem_list_records}\n"
+        f"exclude_condition_type_concept_ids: {exclude_condition_type_concept_ids}\n"
     )
 
     concept = preprocess_domain_table(spark, input_folder, CONCEPT)
@@ -139,6 +143,8 @@ def main(
             with_condition_icd_mapping=with_condition_icd_mapping,
             with_procedure_icd_mapping=with_procedure_icd_mapping,
         )
+        if domain_table_name.startswith("condition") and exclude_condition_type_concept_ids:
+            domain_table = exclude_condition_type_concepts(domain_table, exclude_condition_type_concept_ids)
         domain_table = invalidate_visit_id(
             domain_table,
             visit_occurrence
@@ -414,6 +420,16 @@ def create_argparser():
         action="store_true",
         help="Indicate whether we want to disconnect the problem list records when constructing artificial visits"
     )
+    parser.add_argument(
+        "--exclude_condition_type_concept_ids",
+        dest="exclude_condition_type_concept_ids",
+        nargs="+",
+        type=int,
+        action="store",
+        default=None,
+        help="The condition_type_concept_ids whose condition_occurrence records are excluded, "
+        "e.g. 32840 (EHR problem list) 32821 (EHR billing record)",
+    )
     return parser
 
 
@@ -448,5 +464,6 @@ if __name__ == "__main__":
         aggregate_by_hour=ARGS.aggregate_by_hour,
         should_construct_artificial_visits=ARGS.should_construct_artificial_visits,
         duplicate_records=ARGS.duplicate_records,
-        disconnect_problem_list_records=ARGS.disconnect_problem_list_records
+        disconnect_problem_list_records=ARGS.disconnect_problem_list_records,
+        exclude_condition_type_concept_ids=ARGS.exclude_condition_type_concept_ids,
     )
