@@ -258,6 +258,9 @@ class AttEventDecorator(PatientEventDecorator):
             inpatient_visits, ["visit_occurrence_id", "cohort_member_id"]
         )
 
+        # The events of an inpatient visit are ordered by datetime, so the datetime is authoritative and the date is
+        # derived from it. The date of a record can disagree with its datetime (e.g. the datetime is midnight stored
+        # in UTC and falls on the previous day), which would make the time tokens go backwards (i-D-1).
         # Fill in the visit_end_date if null (because some visits are still ongoing at the time of data extraction)
         # Bound the event dates within visit_start_date and visit_end_date
         # Generate a span rank to indicate the position of the group of events
@@ -270,6 +273,7 @@ class AttEventDecorator(PatientEventDecorator):
                     F.max("date").over(W.partitionBy("cohort_member_id", "visit_occurrence_id")),
                 ),
             )
+            .withColumn("date", F.to_date("datetime"))
             .withColumn(
                 "date",
                 F.when(F.col("date") < F.col("visit_start_date"), F.col("visit_start_date")).otherwise(
@@ -336,7 +340,7 @@ class AttEventDecorator(PatientEventDecorator):
             )
         else:
             inpatient_date_delta_udf = F.when(F.col("prev_date").isNull(), 0).otherwise(
-                F.datediff("date", "prev_date")
+                F.greatest(F.datediff("date", "prev_date"), F.lit(0))
             )
 
         # Create ATT tokens within the inpatient visits between groups of events that occur on different dates
