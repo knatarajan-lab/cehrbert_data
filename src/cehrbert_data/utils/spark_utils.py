@@ -256,7 +256,8 @@ def extract_events_by_domain(
             datetime_field_udf = F.to_timestamp(F.coalesce(datetime_field, date_field))
             domain_records = (
                 domain_records.where(F.col(concept_id_field).cast("string") != "0")
-                .withColumn("date", F.to_date(F.col(date_field)))
+                # The datetime is authoritative, the date is only used when the datetime is missing
+                .withColumn("date", F.to_date(datetime_field_udf))
                 .withColumn("datetime", datetime_field_udf)
             )
             concept: DataFrame = kwargs.get("concept")
@@ -1394,7 +1395,7 @@ def get_measurement_events(
         """
         SELECT DISTINCT m.person_id,
                         m.measurement_concept_id AS standard_concept_id,
-                        CAST(m.measurement_date AS DATE) AS date,
+                        CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS DATE) AS date,
             CAST(COALESCE(m.measurement_datetime, m.measurement_date) AS TIMESTAMP) AS datetime,
             m.visit_occurrence_id AS visit_occurrence_id,
             'measurement' AS domain,
@@ -1468,7 +1469,7 @@ def get_observation_events(
         """
         SELECT DISTINCT o.person_id,
                         o.observation_concept_id AS standard_concept_id,
-                        CAST(o.observation_date AS DATE) AS date,
+                        CAST(COALESCE(o.observation_datetime, o.observation_date) AS DATE) AS date,
             CAST(COALESCE(o.observation_datetime, o.observation_date) AS TIMESTAMP) AS datetime,
             o.visit_occurrence_id AS visit_occurrence_id,
             'observation' AS domain,
@@ -1537,7 +1538,7 @@ def get_device_events(
         """
         SELECT DISTINCT d.person_id,
                         d.device_concept_id AS standard_concept_id,
-                        CAST(d.device_exposure_start_date AS DATE) AS date,
+                        CAST(COALESCE(d.device_exposure_start_datetime, d.device_exposure_start_date) AS DATE) AS date,
             CAST(COALESCE(d.device_exposure_start_datetime, d.device_exposure_start_date) AS TIMESTAMP) AS datetime,
             d.visit_occurrence_id AS visit_occurrence_id,
             'device' AS domain,
