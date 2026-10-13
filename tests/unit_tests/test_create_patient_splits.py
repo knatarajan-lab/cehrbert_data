@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -62,6 +63,17 @@ class CreatePatientSplitsTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             main(self.folder)
         main(self.folder, train_ratio=0.5, overwrite=True)
+
+    @unittest.skipIf(shutil.which("lzop") is None, "lzop is not installed")
+    def test_main_reads_an_lzo_person_table(self):
+        csv_path = os.path.join(self.folder, "person.csv")
+        with open(csv_path, "w") as f:
+            f.write("person_id,gender_concept_id\n" + "".join(f"{i},8507\n" for i in range(1, 201)))
+        subprocess.run(["lzop", "-q", csv_path], check=True)  # person.csv.lzo
+        os.remove(csv_path)
+        main(self.folder)
+        written = self.spark.read.parquet(os.path.join(self.folder, PATIENT_SPLITS))
+        self.assertEqual(sorted(row["person_id"] for row in written.collect()), list(range(1, 201)))
 
     def test_main_without_a_person_table(self):
         with self.assertRaises(FileNotFoundError):
