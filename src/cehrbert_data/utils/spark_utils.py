@@ -1,7 +1,6 @@
 import argparse
 import logging
 import os.path
-from os import path
 from typing import List, Tuple
 
 import pandas as pd
@@ -37,6 +36,7 @@ from cehrbert_data.decorators import (
 
 from cehrbert_data.utils.icd_cm_tokens import get_spark_udf as get_icd_cm_tokens_udf
 from cehrbert_data.utils.icd_pcs_tokens import get_spark_udf as get_icd_pcs_tokens_udf
+from cehrbert_data.utils.omop_tables import omop_table_exists, read_omop_table
 from cehrbert_data.utils.vocab_utils import (
     roll_up_to_drug_ingredients,
     roll_up_diagnosis,
@@ -404,7 +404,7 @@ def preprocess_domain_table(
         with_condition_icd_mapping=False,
         with_procedure_icd_mapping=False,
 ):
-    domain_table = spark.read.parquet(os.path.join(input_folder, domain_table_name))
+    domain_table = read_omop_table(spark, input_folder, domain_table_name)
     if "concept" in domain_table_name.lower():
         return domain_table
 
@@ -427,60 +427,60 @@ def preprocess_domain_table(
     if with_drug_rollup:
         if (
                 domain_table_name == "drug_exposure"
-                and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_ancestor"))
+                and omop_table_exists(input_folder, "concept")
+                and omop_table_exists(input_folder, "concept_ancestor")
         ):
-            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
-            concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
+            concept = read_omop_table(spark, input_folder, "concept")
+            concept_ancestor = read_omop_table(spark, input_folder, "concept_ancestor")
             domain_table = roll_up_to_drug_ingredients(domain_table, concept, concept_ancestor)
 
     if with_atc_rollup:
         if (
                 domain_table_name == "drug_exposure"
-                and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_relationship"))
+                and omop_table_exists(input_folder, "concept")
+                and omop_table_exists(input_folder, "concept_relationship")
         ):
-            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
-            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            concept = read_omop_table(spark, input_folder, "concept")
+            concept_relationship = read_omop_table(spark, input_folder, "concept_relationship")
             domain_table = map_to_atc_codes(domain_table, concept, concept_relationship)
 
     if with_condition_icd_mapping:
         if (
                 domain_table_name == "condition_occurrence"
-                and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_relationship"))
+                and omop_table_exists(input_folder, "concept")
+                and omop_table_exists(input_folder, "concept_relationship")
         ):
-            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
-            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            concept = read_omop_table(spark, input_folder, "concept")
+            concept_relationship = read_omop_table(spark, input_folder, "concept_relationship")
             domain_table = map_condition_source_concepts_to_icd(domain_table, concept, concept_relationship)
 
     if with_procedure_icd_mapping:
         if (
                 domain_table_name == "procedure_occurrence"
-                and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_relationship"))
+                and omop_table_exists(input_folder, "concept")
+                and omop_table_exists(input_folder, "concept_relationship")
         ):
-            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
-            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            concept = read_omop_table(spark, input_folder, "concept")
+            concept_relationship = read_omop_table(spark, input_folder, "concept_relationship")
             domain_table = map_procedure_source_concepts_to_icd10pcs(domain_table, concept, concept_relationship)
 
     if with_diagnosis_rollup:
         if (
                 domain_table_name == "condition_occurrence"
-                and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_relationship"))
+                and omop_table_exists(input_folder, "concept")
+                and omop_table_exists(input_folder, "concept_relationship")
         ):
-            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
-            concept_relationship = spark.read.parquet(os.path.join(input_folder, "concept_relationship"))
+            concept = read_omop_table(spark, input_folder, "concept")
+            concept_relationship = read_omop_table(spark, input_folder, "concept_relationship")
             domain_table = roll_up_diagnosis(domain_table, concept, concept_relationship)
 
         if (
                 domain_table_name == "procedure_occurrence"
-                and path.exists(os.path.join(input_folder, "concept"))
-                and path.exists(os.path.join(input_folder, "concept_relationship"))
+                and omop_table_exists(input_folder, "concept")
+                and omop_table_exists(input_folder, "concept_relationship")
         ):
-            concept = spark.read.parquet(os.path.join(input_folder, "concept"))
-            concept_ancestor = spark.read.parquet(os.path.join(input_folder, "concept_ancestor"))
+            concept = read_omop_table(spark, input_folder, "concept")
+            concept_ancestor = read_omop_table(spark, input_folder, "concept_ancestor")
             domain_table = roll_up_procedure(domain_table, concept, concept_ancestor)
 
     return domain_table

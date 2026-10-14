@@ -3,7 +3,6 @@ import configparser
 import os.path
 
 from pyspark.sql import SparkSession
-from pyspark.sql import functions as f
 
 from cehrbert_data.const.common import (
     CONDITION_OCCURRENCE,
@@ -14,6 +13,7 @@ from cehrbert_data.const.common import (
     PROCEDURE_OCCURRENCE,
     VISIT_OCCURRENCE,
 )
+from cehrbert_data.tools.create_patient_splits import create_patient_splits
 
 omop_table_dict = {
     PERSON: "person_id",
@@ -138,8 +138,5 @@ if __name__ == "__main__":
     if not os.path.exists(patient_splits_folder):
         print("Creating the patient splits")
         person = spark.read.parquet(os.path.join(download_folder, "person"))
-        train_split, test_split = person.select("person_id").randomSplit([0.8, 0.2], seed=42)
-        train_split = train_split.withColumn("split", f.lit("train"))
-        test_split = test_split.withColumn("split", f.lit("test"))
-        patient_splits = train_split.unionByName(test_split)
+        patient_splits = create_patient_splits(person, train_ratio=0.8, seed=42)
         patient_splits.write.parquet(os.path.join(download_folder, "patient_splits"))
